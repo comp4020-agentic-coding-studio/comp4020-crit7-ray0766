@@ -1,0 +1,90 @@
+---
+import Base from "../../layouts/Base.astro";
+import { getCatalogue, getPlan, listEntries } from "../../lib/db";
+import { labelSession, planSessions } from "../../lib/sessions";
+
+// The plan page: one section per semester, each with the courses in it, its
+// unit count and a form to add another. The data-session / data-course
+// attributes are the page's promise to spec/plan.test.ts — which semester a
+// course sits in, read the way a person reads it.
+const plan = Astro.params.id ? getPlan(Astro.params.id) : undefined;
+if (!plan) return new Response("No such plan", { status: 404 });
+
+const catalogue = getCatalogue();
+const entries = listEntries(plan.id);
+const sessions = planSessions(plan.startSession, plan.semesters);
+
+const program = catalogue.programs.get(plan.programCode);
+const specialisation = plan.specialisationCode
+  ? catalogue.specialisations.get(plan.specialisationCode)
+  : undefined;
+
+// only ever a code the catalogue knows, so the notice can't carry arbitrary text
+const already = Astro.url.searchParams.get("already");
+const notice =
+  already && catalogue.courses.has(already) ? `${already} is already in this plan.` : undefined;
+
+const courseOptions = [...catalogue.courses.values()].sort((a, b) =>
+  a.code.localeCompare(b.code),
+);
+const unitsIn = (session: string): number =>
+  entries
+    .filter((e) => e.session === session)
+    .reduce((n, e) => n + (catalogue.courses.get(e.courseCode)?.units ?? 0), 0);
+---
+
+<Base title={`${plan.name} · Tally`}>
+  <header class="plan-head">
+    <h1>{plan.name}</h1>
+    <p class="meta">
+      {program?.name}{specialisation && <> · {specialisation.name}</>} ·
+      {plan.semesters} semesters from {labelSession(plan.startSession)}
+    </p>
+    {notice && <p class="notice" role="status">{notice}</p>}
+  </header>
+
+  <div class="semesters">
+    {
+      sessions.map((session) => (
+        <section class="semester" data-session={session} aria-labelledby={`h-${session}`}>
+          <h2 id={`h-${session}`}>{labelSession(session)}</h2>
+          <p class="units">{unitsIn(session)} units</p>
+          <ul class="entries">
+            {entries
+              .filter((e) => e.session === session)
+              .map((e) => {
+                const course = catalogue.courses.get(e.courseCode);
+                return (
+                  <li data-course={e.courseCode}>
+                    <span class="code">{e.courseCode}</span>
+                    <span class="title">{course?.title ?? "(unknown course)"}</span>
+                    <span class="u">{course?.units ?? "?"} units</span>
+                    <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/delete`}>
+                      <button aria-label={`Remove ${e.courseCode}`}>Remove</button>
+                    </form>
+                  </li>
+                );
+              })}
+          </ul>
+          <form method="post" action={`/api/plans/${plan.id}/entries`} class="add">
+            <input type="hidden" name="session" value={session} />
+            <label for={`add-${session}`}>Add a course</label>
+            <select id={`add-${session}`} name="course" required>
+              <option value="">Choose a course…</option>
+              {courseOptions.map((c) => (
+                <option value={c.code}>
+                  {c.code} · {c.title} ({c.units} units)
+                </option>
+              ))}
+            </select>
+            <button>Add</button>
+          </form>
+        </section>
+      ))
+    }
+  </div>
+
+  <form method="post" action={`/api/plans/${plan.id}/extend`} class="extend">
+    <button>Add a semester</button>
+  </form>
+</Base>

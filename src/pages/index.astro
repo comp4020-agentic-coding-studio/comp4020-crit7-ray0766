@@ -1,5 +1,11 @@
 ---
 import Base from "../layouts/Base.astro";
+import { DEMO_PLAN_ID } from "../lib/seed";
+import { labelSession, planSessions } from "../lib/sessions";
+
+// The front door: what this is, and one form that starts a plan. Plans are
+// not listed anywhere — a plan's URL is the only way to it.
+const starts = planSessions("2026-S1", 4);
 ---
 
 <Base
@@ -7,10 +13,31 @@ import Base from "../layouts/Base.astro";
   description="A study planner for the ANU Master of Computing: see what ANUHub would say before enrolment day."
 >
   <h1>Tally</h1>
+  <p class="lede">
+    A study planner for the ANU Master of Computing. Put courses into
+    semesters and see, before enrolment day, what ANUHub would only tell you
+    when you press enrol — requisite not met, incompatible, not offered this
+    semester, overloaded — and how far the plan is from the 96 units the
+    program asks for.
+  </p>
+
+  <form method="post" action="/api/plans" class="start">
+    <div class="field">
+      <label for="name">Name the plan</label>
+      <input id="name" name="name" maxlength="80" placeholder="My plan" />
+    </div>
+    <div class="field">
+      <label for="start">First semester</label>
+      <select id="start" name="start">
+        {starts.map((s) => <option value={s}>{labelSession(s)}</option>)}
+      </select>
+    </div>
+    <button>Start a plan</button>
+  </form>
+
   <p>
-    A study planner for the ANU Master of Computing. Put courses into semesters
-    and see, before enrolment day, what ANUHub would only tell you when you
-    press enrol — and how far the plan is from the 96 units the program asks
-    for.
+    Or look at the <a href={`/plan/${DEMO_PLAN_ID}`}>demo plan</a> — a
+    two-year Master of Computing with a few of the placements ANUHub would
+    bounce, and the <a href="/readme/">account of what good looks like here</a>.
   </p>
 </Base>
