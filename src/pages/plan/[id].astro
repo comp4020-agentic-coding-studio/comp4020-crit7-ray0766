@@ -74,7 +74,7 @@ const { units, counted, needed } = evaluation.totals;
     {notice && <p class="notice" role="status">{notice}</p>}
   </header>
 
-  <div class="plan-body">
+  <div class="plan-body" data-plan={plan.id}>
     <div class="semesters">
       {
         sessions.map((session) => {
@@ -211,4 +211,18 @@ const { units, counted, needed } = evaluation.totals;
       </p>
     </aside>
   </div>
+
+  <script>
+    // The live half: every plan change is broadcast over the SSE stream, and
+    // any other tab or device showing this plan reloads to pick it up. The tab
+    // that made the change is already on its way back via the 303, so it
+    // drops the stream the moment it submits a form.
+    const planId = document.querySelector<HTMLElement>(".plan-body")?.dataset.plan;
+    const source = new EventSource("/api/events");
+    source.addEventListener("message", (event) => {
+      const change = JSON.parse(event.data);
+      if (change.planId === planId) location.reload();
+    });
+    document.addEventListener("submit", () => source.close());
+  </script>
 </Base>
