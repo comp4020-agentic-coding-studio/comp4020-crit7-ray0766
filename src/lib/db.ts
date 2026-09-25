@@ -5,8 +5,10 @@ import Database from "better-sqlite3";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import type { Catalogue } from "./catalogue";
 import * as schema from "./schema";
 import { type Plan, type PlanEntry, planEntries, plans } from "./schema";
+import { loadCatalogue, seedDemoPlan, seedReferenceData } from "./seed";
 
 // One SQLite file is the app's whole persistent state. In production
 // fly.toml points DATABASE_PATH at the machine's volume (/data), which is
@@ -29,6 +31,18 @@ export const db = drizzle(client, { schema });
 // edit src/lib/schema.ts, `pnpm db:generate`, commit the migration it writes
 // to drizzle/.
 migrate(db, { migrationsFolder: "./drizzle" });
+
+// Then the reference tables are rebuilt from src/data/ and the demo plan is
+// made if it is missing. Only after that is the catalogue read back.
+seedReferenceData(db);
+seedDemoPlan(db);
+
+// Reference data changes only at boot, so one read serves every request.
+const catalogue: Catalogue = loadCatalogue(db);
+
+export function getCatalogue(): Catalogue {
+  return catalogue;
+}
 
 export type { Plan, PlanEntry };
 
