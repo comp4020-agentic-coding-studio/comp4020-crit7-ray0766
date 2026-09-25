@@ -92,14 +92,13 @@ export function addEntry(planId: string, courseCode: string, session: string): P
   return db.insert(planEntries).values({ planId, courseCode, session }).returning().get();
 }
 
-export function hasEntry(planId: string, courseCode: string): boolean {
-  return (
-    db
-      .select({ id: planEntries.id })
-      .from(planEntries)
-      .where(and(eq(planEntries.planId, planId), eq(planEntries.courseCode, courseCode)))
-      .get() !== undefined
-  );
+/** How many times a course is already in a plan (0, 1, or 2 for COMP8715). */
+export function countEntries(planId: string, courseCode: string): number {
+  return db
+    .select({ id: planEntries.id })
+    .from(planEntries)
+    .where(and(eq(planEntries.planId, planId), eq(planEntries.courseCode, courseCode)))
+    .all().length;
 }
 
 /** Removes one entry of one plan; false when there was no such entry. */

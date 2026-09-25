@@ -209,6 +209,14 @@ describe("rules: progress", () => {
     expect(line(e, "elective", 0).courses).toEqual(["TEST8200"]);
   });
 
+  it("counts a repeated course as two placements", () => {
+    // the second TEST8100 doesn't fit under the max line's cap, so it flows on
+    const e = evaluate(entry("TEST8100", "2026-S1"), entry("TEST8100", "2026-S2"));
+    expect(line(e, "max")).toMatchObject({ have: 6, courses: ["TEST8100"] });
+    expect(line(e, "elective", 0)).toMatchObject({ have: 6, courses: ["TEST8100"] });
+    expect(line(e, "level_min")).toMatchObject({ have: 12, satisfied: true });
+  });
+
   it("counts units at a level across the whole plan", () => {
     const e = evaluate(entry("TEST8100", "2026-S1"), entry("TEST8200", "2026-S2"), entry("TEST1000", "2026-S1"));
     expect(line(e, "level_min")).toMatchObject({ have: 12, satisfied: true });

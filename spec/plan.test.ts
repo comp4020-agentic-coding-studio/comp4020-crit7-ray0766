@@ -96,6 +96,21 @@ describe("plans", () => {
     expect(entriesIn(doc, "2027-S1")).toEqual([]);
   });
 
+  it("lets a course that is taken twice in twice, and no more", async () => {
+    for (const session of ["2027-S1", "2027-S2", "2026-S1"]) {
+      const res = await post(
+        `/api/plans/${planId}/entries`,
+        new URLSearchParams({ course: "COMP8715", session }),
+      );
+      expect(res.status, session).toBe(303);
+    }
+    const doc = await page(planPath);
+    expect(entriesIn(doc, "2027-S1")).toEqual(["COMP8715"]);
+    expect(entriesIn(doc, "2027-S2")).toEqual(["COMP8715"]);
+    expect(entriesIn(doc, "2026-S1")).toEqual([]);
+    expect(doc.querySelectorAll('[data-course="COMP8715"]')).toHaveLength(2);
+  });
+
   it("never refuses a real course, whatever the rules will say about it", async () => {
     // COMP8020 needs COMP6390 completed first; the same semester is exactly
     // the placement ANUHub would bounce. The planner takes it and flags it.

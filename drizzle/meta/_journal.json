@@ -22,6 +22,13 @@
       "when": 1790377949925,
       "tag": "0002_requisite-text",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790378879673,
+      "tag": "0003_repeatable-entries",
+      "breakpoints": true
     }
   ]
 }

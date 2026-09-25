@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { addEntry, getCatalogue, getPlan, hasEntry } from "../../../../lib/db";
+import { addEntry, countEntries, getCatalogue, getPlan } from "../../../../lib/db";
 import { bus } from "../../../../lib/events";
 import { planSessions } from "../../../../lib/sessions";
 
@@ -17,15 +17,18 @@ export const POST: APIRoute = async ({ params, request, redirect }) => {
     .toUpperCase();
   const session = String(form.get("session") ?? "").trim();
 
-  if (!getCatalogue().courses.has(course)) {
+  const known = getCatalogue().courses.get(course);
+  if (!known) {
     return new Response(`${course || "(blank)"} is not a course in the catalogue`, { status: 400 });
   }
   if (!planSessions(plan.startSession, plan.semesters).includes(session)) {
     return new Response(`${session || "(blank)"} is not a semester of this plan`, { status: 400 });
   }
 
-  // already there: nothing to do, and nothing to apologise for
-  if (hasEntry(plan.id, course)) {
+  // already there: nothing to do, and nothing to apologise for. A repeatable
+  // course (COMP8715, taken twice) may go in a second time.
+  const times = countEntries(plan.id, course);
+  if (times >= (known.repeatable ? 2 : 1)) {
     return redirect(`/plan/${plan.id}?already=${course}`, 303);
   }
 

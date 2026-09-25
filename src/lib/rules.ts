@@ -224,12 +224,13 @@ function progressLines(
 ): Progress[] {
   const units = (code: string): number => catalogue.courses.get(code)?.units ?? 0;
   const inPlan = new Set(entries.map((e) => e.courseCode));
-  const order = new Map(entries.map((e, i) => [e.courseCode, i]));
 
-  // courses named by any list line are that line's; everything else, plus
-  // what overflows a min or max line, is the pool the elective lines draw on
+  // every entry counts separately — a repeated course is two placements —
+  // and courses named by any list line are that line's; everything else,
+  // plus what overflows a min or max line, is the pool the elective lines
+  // draw on
   const listed = new Set(requirements.flatMap((r) => r.courses));
-  const pool: string[] = entries.map((e) => e.courseCode).filter((code) => !listed.has(code));
+  const pool: EntryLike[] = entries.filter((e) => !listed.has(e.courseCode));
 
   const blank = (r: CatalogueRequirement): Progress => ({
     label: r.label,
@@ -248,53 +249,50 @@ function progressLines(
   for (const r of requirements) {
     if (r.kind === "elective") continue;
     const line = blank(r);
-    const present = r.courses
-      .filter((code) => inPlan.has(code))
-      .sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+    const present = entries.filter((e) => r.courses.includes(e.courseCode));
 
     switch (r.kind) {
       case "all": {
-        line.courses = present;
-        line.have = present.reduce((n, code) => n + units(code), 0);
+        line.courses = present.map((e) => e.courseCode);
+        line.have = present.reduce((n, e) => n + units(e.courseCode), 0);
         line.missing = r.courses.filter((code) => !inPlan.has(code));
         line.satisfied = line.missing.length === 0;
         break;
       }
       case "min": {
-        // count courses in plan order until the minimum is met; the rest overflow
-        for (const code of present) {
+        // count placements in plan order until the minimum is met; the rest overflow
+        for (const e of present) {
           if (line.have >= r.units) {
-            pool.push(code);
+            pool.push(e);
             continue;
           }
-          line.courses.push(code);
-          line.have += units(code);
+          line.courses.push(e.courseCode);
+          line.have += units(e.courseCode);
         }
         line.satisfied = line.have >= r.units;
         break;
       }
       case "max": {
-        // count courses while they fit under the cap; the rest overflow
-        for (const code of present) {
-          if (line.have + units(code) > r.units) {
-            pool.push(code);
+        // count placements while they fit under the cap; the rest overflow
+        for (const e of present) {
+          if (line.have + units(e.courseCode) > r.units) {
+            pool.push(e);
             continue;
           }
-          line.courses.push(code);
-          line.have += units(code);
+          line.courses.push(e.courseCode);
+          line.have += units(e.courseCode);
         }
         line.satisfied = true;
         break;
       }
       case "level_min": {
-        line.courses = entries
-          .map((e) => e.courseCode)
-          .filter(
-            (code) =>
-              levelOf(code) >= (r.level ?? 0) &&
-              (!r.subjects || r.subjects.includes(subjectOf(code))),
-          );
-        line.have = line.courses.reduce((n, code) => n + units(code), 0);
+        const counted = entries.filter(
+          (e) =>
+            levelOf(e.courseCode) >= (r.level ?? 0) &&
+            (!r.subjects || r.subjects.includes(subjectOf(e.courseCode))),
+        );
+        line.courses = counted.map((e) => e.courseCode);
+        line.have = counted.reduce((n, e) => n + units(e.courseCode), 0);
         line.satisfied = line.have >= r.units;
         break;
       }
@@ -306,14 +304,15 @@ function progressLines(
   for (const r of requirements) {
     if (r.kind !== "elective") continue;
     const line = blank(r);
-    for (const code of [...pool]) {
+    for (const e of [...pool]) {
       if (line.have >= r.units) break;
       const eligible =
-        levelOf(code) >= 6000 && (!r.subjects || r.subjects.includes(subjectOf(code)));
+        levelOf(e.courseCode) >= 6000 &&
+        (!r.subjects || r.subjects.includes(subjectOf(e.courseCode)));
       if (!eligible) continue;
-      pool.splice(pool.indexOf(code), 1);
-      line.courses.push(code);
-      line.have += units(code);
+      pool.splice(pool.indexOf(e), 1);
+      line.courses.push(e.courseCode);
+      line.have += units(e.courseCode);
     }
     line.satisfied = line.have >= r.units;
     lines.set(r, line);

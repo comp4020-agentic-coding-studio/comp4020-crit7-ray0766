@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { int, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, int, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // The schema is the ground truth for the database. To change it: edit here,
 // run `pnpm db:generate` to turn the diff into a migration under drizzle/,
@@ -136,8 +136,9 @@ export const plans = sqliteTable("plans", {
     .default(sql`(datetime('now'))`),
 });
 
-// One course placed in one session of one plan. A course appears in a plan
-// at most once (repeatable courses included, for now — see README).
+// One course placed in one session of one plan. Whether a course may appear
+// twice is the course's business (COMP8715 is taken twice; nothing else is),
+// so the route enforces it from the catalogue rather than the table.
 export const planEntries = sqliteTable(
   "plan_entries",
   {
@@ -153,7 +154,7 @@ export const planEntries = sqliteTable(
       .notNull()
       .default(sql`(datetime('now'))`),
   },
-  (t) => [uniqueIndex("plan_entries_plan_course").on(t.planId, t.courseCode)],
+  (t) => [index("plan_entries_plan").on(t.planId)],
 );
 
 export type Program = typeof programs.$inferSelect;

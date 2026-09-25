@@ -141,10 +141,10 @@ const DEMO_ENTRIES: [string, string][] = [
   ["2027-S1", "COMP6528"],
   ["2027-S1", "COMP8610"],
   ["2027-S1", "COMP8350"],
+  ["2027-S2", "COMP8715"],
   ["2027-S2", "COMP6120"],
   ["2027-S2", "COMP8430"],
   ["2027-S2", "COMP6670"],
-  ["2027-S2", "COMP6260"],
 ];
 
 export function seedDemoPlan(db: Db): void {
