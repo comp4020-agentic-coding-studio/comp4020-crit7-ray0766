@@ -15,6 +15,13 @@
       "when": 1790377457514,
       "tag": "0001_plans",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790377949925,
+      "tag": "0002_requisite-text",
+      "breakpoints": true
     }
   ]
 }

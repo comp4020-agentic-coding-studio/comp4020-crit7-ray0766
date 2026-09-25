@@ -1,0 +1,1 @@
+ALTER TABLE `courses` ADD `requisite_text` text DEFAULT '' NOT NULL;

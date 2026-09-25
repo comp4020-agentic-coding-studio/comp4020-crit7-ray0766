@@ -38,8 +38,11 @@ export const courses = sqliteTable("courses", {
   units: int().notNull(),
   // COMP8715 is taken twice; everything else once
   repeatable: int({ mode: "boolean" }).notNull().default(false),
-  // false until the requisite text on the course page has been transcribed;
-  // the planner says "not checked" rather than passing such a course silently
+  // the requisite line as the course page states it, condensed; the groups in
+  // requisite_groups are its machine form
+  requisiteText: text("requisite_text").notNull().default(""),
+  // false when that line has a shape the groups can't carry; the planner
+  // says "not checked" for such a course rather than passing it silently
   requisitesVerified: int("requisites_verified", { mode: "boolean" }).notNull().default(false),
   sourceUrl: text("source_url").notNull(),
 });
