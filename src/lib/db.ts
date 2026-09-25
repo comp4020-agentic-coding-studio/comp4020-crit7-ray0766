@@ -1,10 +1,12 @@
+import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import { desc } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { type Message, messages } from "./schema";
+import * as schema from "./schema";
+import { type Plan, type PlanEntry, planEntries, plans } from "./schema";
 
 // One SQLite file is the app's whole persistent state. In production
 // fly.toml points DATABASE_PATH at the machine's volume (/data), which is
@@ -15,21 +17,91 @@ mkdirSync(dirname(path), { recursive: true });
 
 const client = new Database(path);
 client.pragma("journal_mode = WAL");
+// SQLite only enforces the schema's foreign keys when asked to, per connection
+client.pragma("foreign_keys = ON");
 
-export const db = drizzle(client);
+export const db = drizzle(client, { schema });
 
-// Migrations run at boot, on whatever machine holds the volume — the
-// recommended shape for SQLite on Fly, where there's no separate machine to
-// run them from. The flow: edit src/lib/schema.ts, `pnpm db:generate`,
-// commit the migration it writes to drizzle/.
+// Migrations run when this module loads, on whatever machine holds the
+// volume — the recommended shape for SQLite on Fly, where there's no separate
+// machine to run them from. src/middleware.ts imports this module, so that
+// is the first request the server handles, whatever the route. The flow:
+// edit src/lib/schema.ts, `pnpm db:generate`, commit the migration it writes
+// to drizzle/.
 migrate(db, { migrationsFolder: "./drizzle" });
 
-export type { Message };
+export type { Plan, PlanEntry };
 
-export function listMessages(): Message[] {
-  return db.select().from(messages).orderBy(desc(messages.id)).limit(50).all();
+// ------------------------------------------------------------------- plans
+
+export function getPlan(id: string): Plan | undefined {
+  return db.select().from(plans).where(eq(plans.id, id)).get();
 }
 
-export function addMessage(body: string): Message {
-  return db.insert(messages).values({ body }).returning().get();
+export function listEntries(planId: string): PlanEntry[] {
+  return db
+    .select()
+    .from(planEntries)
+    .where(eq(planEntries.planId, planId))
+    .orderBy(asc(planEntries.session), asc(planEntries.id))
+    .all();
+}
+
+export interface NewPlan {
+  id?: string;
+  name: string;
+  programCode: string;
+  specialisationCode: string | null;
+  startSession: string;
+  semesters?: number;
+}
+
+// The id is the plan's whole identity — there is no login — so it is random
+// and short enough to read out: 8 url-safe characters, 48 bits.
+export function createPlan(input: NewPlan): Plan {
+  const id = input.id ?? randomBytes(6).toString("base64url");
+  return db
+    .insert(plans)
+    .values({
+      id,
+      name: input.name,
+      programCode: input.programCode,
+      specialisationCode: input.specialisationCode,
+      startSession: input.startSession,
+      semesters: input.semesters ?? 4,
+    })
+    .returning()
+    .get();
+}
+
+export function addEntry(planId: string, courseCode: string, session: string): PlanEntry {
+  return db.insert(planEntries).values({ planId, courseCode, session }).returning().get();
+}
+
+export function hasEntry(planId: string, courseCode: string): boolean {
+  return (
+    db
+      .select({ id: planEntries.id })
+      .from(planEntries)
+      .where(and(eq(planEntries.planId, planId), eq(planEntries.courseCode, courseCode)))
+      .get() !== undefined
+  );
+}
+
+/** Removes one entry of one plan; false when there was no such entry. */
+export function removeEntry(planId: string, entryId: number): boolean {
+  const removed = db
+    .delete(planEntries)
+    .where(and(eq(planEntries.planId, planId), eq(planEntries.id, entryId)))
+    .returning({ id: planEntries.id })
+    .all();
+  return removed.length > 0;
+}
+
+/** One more semester on the end of the plan. */
+export function extendPlan(planId: string): void {
+  db.update(plans)
+    .set({ semesters: sql`${plans.semesters} + 1` })
+    .where(eq(plans.id, planId))
+    .run();
 }

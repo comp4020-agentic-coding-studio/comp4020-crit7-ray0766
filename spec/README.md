@@ -37,13 +37,12 @@ whole of `README.md`, your account of what the app is and what good looks like
 here. It renders the markdown to text and asks whether the served page contains
 all of it, so styling and navigation around it pass and a trimmed copy fails.
 
-## The starter's plumbing (shipped, retires with the starter)
+## The starter's plumbing (retired)
 
-`guestbook.test.ts` drives the running app over HTTP to prove the supplied
-plumbing works in this repo: a message survives a reload, and a new one reaches
-other clients over the SSE stream. A red run on a fresh clone means the platform
-is broken, not your work. It describes the starter, so it goes when the starter
-does.
+The template shipped `guestbook.test.ts`, which drove the starter's guestbook
+over HTTP to prove the supplied plumbing (SQLite persistence, the SSE stream)
+worked in this repo. The guestbook is gone, and so is its test; the same two
+promises are now made about plans, by the tests below.
 
 ## Your spec tests (yours to write)
 
