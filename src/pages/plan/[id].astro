@@ -1,18 +1,26 @@
 ---
 import Base from "../../layouts/Base.astro";
 import { getCatalogue, getPlan, listEntries } from "../../lib/db";
+import { evaluatePlan, FULL_TIME_UNITS, type Issue } from "../../lib/rules";
 import { labelSession, planSessions } from "../../lib/sessions";
 
 // The plan page: one section per semester, each with the courses in it, its
-// unit count and a form to add another. The data-session / data-course
-// attributes are the page's promise to spec/plan.test.ts — which semester a
-// course sits in, read the way a person reads it.
+// unit count and a form to add another; beside them, the tally — what the
+// rules say about every placement, and how far the plan is from the program.
+// The data-session / data-course attributes are the page's promise to
+// spec/plan.test.ts: which semester a course sits in, read the way a person
+// reads it.
 const plan = Astro.params.id ? getPlan(Astro.params.id) : undefined;
 if (!plan) return new Response("No such plan", { status: 404 });
 
 const catalogue = getCatalogue();
 const entries = listEntries(plan.id);
 const sessions = planSessions(plan.startSession, plan.semesters);
+const evaluation = evaluatePlan(catalogue, {
+  programCode: plan.programCode,
+  specialisationCode: plan.specialisationCode,
+  entries,
+});
 
 const program = catalogue.programs.get(plan.programCode);
 const specialisation = plan.specialisationCode
@@ -31,60 +39,176 @@ const unitsIn = (session: string): number =>
   entries
     .filter((e) => e.session === session)
     .reduce((n, e) => n + (catalogue.courses.get(e.courseCode)?.units ?? 0), 0);
+
+const issuesFor = (entryId: number): Issue[] =>
+  evaluation.issues.filter((i) => i.entryId === entryId);
+const sessionIssues = (session: string): Issue[] =>
+  evaluation.issues.filter((i) => i.session === session && i.entryId === undefined);
+const worst = (issues: Issue[]): "error" | "warning" | undefined =>
+  issues.some((i) => i.severity === "error")
+    ? "error"
+    : issues.some((i) => i.severity === "warning")
+      ? "warning"
+      : undefined;
+
+const errors = evaluation.issues.filter((i) => i.severity === "error").length;
+const warnings = evaluation.issues.filter((i) => i.severity === "warning").length;
+const programLines = evaluation.progress.filter((p) => p.ownerKind === "program");
+const specialisationLines = evaluation.progress.filter((p) => p.ownerKind === "specialisation");
+const { units, counted, needed } = evaluation.totals;
 ---
 
 <Base title={`${plan.name} · Tally`}>
   <header class="plan-head">
     <h1>{plan.name}</h1>
     <p class="meta">
-      {program?.name}{specialisation && <> · {specialisation.name}</>} ·
-      {plan.semesters} semesters from {labelSession(plan.startSession)}
+      {program?.name}
+      {specialisation && <> · {specialisation.name}</>}
+      {" · "}{plan.semesters} semesters from {labelSession(plan.startSession)}
+    </p>
+    <p class="summary">
+      <strong>{counted}</strong> of {needed} units count{" · "}
+      {errors === 0 ? "nothing ANUHub would bounce" : `${errors} ANUHub would bounce`}{" · "}
+      <a href="#tally-h">tally</a>
     </p>
     {notice && <p class="notice" role="status">{notice}</p>}
   </header>
 
-  <div class="semesters">
-    {
-      sessions.map((session) => (
-        <section class="semester" data-session={session} aria-labelledby={`h-${session}`}>
-          <h2 id={`h-${session}`}>{labelSession(session)}</h2>
-          <p class="units">{unitsIn(session)} units</p>
-          <ul class="entries">
-            {entries
-              .filter((e) => e.session === session)
-              .map((e) => {
-                const course = catalogue.courses.get(e.courseCode);
-                return (
-                  <li data-course={e.courseCode}>
-                    <span class="code">{e.courseCode}</span>
-                    <span class="title">{course?.title ?? "(unknown course)"}</span>
-                    <span class="u">{course?.units ?? "?"} units</span>
-                    <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/delete`}>
-                      <button aria-label={`Remove ${e.courseCode}`}>Remove</button>
-                    </form>
-                  </li>
-                );
-              })}
-          </ul>
-          <form method="post" action={`/api/plans/${plan.id}/entries`} class="add">
-            <input type="hidden" name="session" value={session} />
-            <label for={`add-${session}`}>Add a course</label>
-            <select id={`add-${session}`} name="course" required>
-              <option value="">Choose a course…</option>
-              {courseOptions.map((c) => (
-                <option value={c.code}>
-                  {c.code} · {c.title} ({c.units} units)
-                </option>
+  <div class="plan-body">
+    <div class="semesters">
+      {
+        sessions.map((session) => {
+          const load = unitsIn(session);
+          const overload = sessionIssues(session);
+          return (
+            <section
+              class:list={["semester", { "semester--over": overload.length > 0 }]}
+              data-session={session}
+              aria-labelledby={`h-${session}`}
+            >
+              <h2 id={`h-${session}`}>{labelSession(session)}</h2>
+              <p class="units">
+                <span class="units-n">{load}</span> of {FULL_TIME_UNITS} units
+              </p>
+              {overload.map((i) => (
+                <p class="flag flag--warning">{i.message}</p>
               ))}
-            </select>
-            <button>Add</button>
-          </form>
-        </section>
-      ))
-    }
-  </div>
+              <ul class="entries">
+                {entries
+                  .filter((e) => e.session === session)
+                  .map((e) => {
+                    const course = catalogue.courses.get(e.courseCode);
+                    const issues = issuesFor(e.id);
+                    const level = worst(issues);
+                    return (
+                      <li
+                        class:list={["entry", level && `entry--${level}`]}
+                        data-course={e.courseCode}
+                      >
+                        <div class="entry-line">
+                          <span class="code">{e.courseCode}</span>
+                          <span class="title">{course?.title ?? "(unknown course)"}</span>
+                        </div>
+                        <div class="entry-foot">
+                          <span class="u">{course?.units ?? "?"} units</span>
+                          <form
+                            method="post"
+                            action={`/api/plans/${plan.id}/entries/${e.id}/delete`}
+                          >
+                            <button class="remove" aria-label={`Remove ${e.courseCode}`}>
+                              Remove
+                            </button>
+                          </form>
+                        </div>
+                        {issues.length > 0 && (
+                          <ul class="flags">
+                            {issues.map((i) => (
+                              <li class:list={["flag", `flag--${i.severity}`]}>{i.message}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
+              </ul>
+              <form method="post" action={`/api/plans/${plan.id}/entries`} class="add">
+                <input type="hidden" name="session" value={session} />
+                <label for={`add-${session}`} class="visually-hidden">
+                  Add a course to {labelSession(session)}
+                </label>
+                <select id={`add-${session}`} name="course" required>
+                  <option value="">Add a course…</option>
+                  {courseOptions.map((c) => (
+                    <option value={c.code}>
+                      {c.code} · {c.title} ({c.units} units)
+                    </option>
+                  ))}
+                </select>
+                <button>Add</button>
+              </form>
+            </section>
+          );
+        })
+      }
+      <form method="post" action={`/api/plans/${plan.id}/extend`} class="extend">
+        <button>Add a semester</button>
+      </form>
+    </div>
 
-  <form method="post" action={`/api/plans/${plan.id}/extend`} class="extend">
-    <button>Add a semester</button>
-  </form>
+    <aside class="tally" aria-labelledby="tally-h">
+      <h2 id="tally-h">Tally</h2>
+      <p class="total">
+        <strong>{counted}</strong> of {needed} units count towards the program
+        {units > counted && <> · {units - counted} placed units don't</>}
+      </p>
+      <p class="verdict">
+        {
+          errors === 0 && warnings === 0
+            ? "Nothing here that ANUHub would bounce."
+            : `${errors} ${errors === 1 ? "placement" : "placements"} ANUHub would bounce · ${warnings} ${warnings === 1 ? "warning" : "warnings"}`
+        }
+      </p>
+
+      <h3>{program?.name}</h3>
+      <ol class="lines">
+        {
+          programLines.map((p) => (
+            <li class:list={["line", { "line--met": p.satisfied, "line--cap": p.kind === "max" }]}>
+              <span class="mark" aria-hidden="true">{p.satisfied && p.kind !== "max" ? "✓" : ""}</span>
+              <span class="label">{p.label}</span>
+              <span class="have">
+                {p.have} {p.kind === "max" ? "of up to" : "of"} {p.needed}
+              </span>
+              {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
+            </li>
+          ))
+        }
+      </ol>
+
+      {
+        specialisation && (
+          <>
+            <h3>{specialisation.name}</h3>
+            <ol class="lines">
+              {specialisationLines.map((p) => (
+                <li class:list={["line", { "line--met": p.satisfied, "line--cap": p.kind === "max" }]}>
+                  <span class="mark" aria-hidden="true">{p.satisfied && p.kind !== "max" ? "✓" : ""}</span>
+                  <span class="label">{p.label}</span>
+                  <span class="have">
+                    {p.have} {p.kind === "max" ? "of up to" : "of"} {p.needed}
+                  </span>
+                  {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
+                </li>
+              ))}
+            </ol>
+          </>
+        )
+      }
+      <p class="fine">
+        Requirements and requisites are transcribed from Programs & Courses 2026; the{" "}
+        <a href="/courses/">course list</a> links each one. The offering pattern is 2026's,
+        assumed to repeat.
+      </p>
+    </aside>
+  </div>
 </Base>

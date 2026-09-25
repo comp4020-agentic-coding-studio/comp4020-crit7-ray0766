@@ -1,40 +1,584 @@
-body {
-  margin: 0;
-  padding: 2rem;
-  font-family: system-ui, sans-serif;
-  line-height: 1.6;
-  color: #1a1a1a;
+/* Tally — one stylesheet, two marking viewports (1920×1080 and 390×844).
+   The palette is deliberately quiet so the three flag colours carry the
+   meaning: red for what ANUHub would bounce, amber for a warning, green for
+   a requirement line that is met. */
+
+:root {
+  --paper: #fbfaf7;
+  --card: #ffffff;
+  --ink: #1d1d1b;
+  --ink-2: #4f4f4a;
+  --ink-3: #7b7b74;
+  --rule: #e2e0d8;
+  --accent: #0b5fff;
+  --accent-ink: #ffffff;
+  --error: #b3261e;
+  --error-bg: #fdecea;
+  --warning: #8a5a00;
+  --warning-bg: #fff4d6;
+  --ok: #1c7c3a;
+  --ok-bg: #e7f6ec;
+  --radius: 8px;
+  --gap: 1rem;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
-main {
-  max-width: 40rem;
-  margin: 0 auto;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #171716;
+    --card: #1f1f1d;
+    --ink: #ecebe6;
+    --ink-2: #bdbcb4;
+    --ink-3: #8d8c84;
+    --rule: #34342f;
+    --accent: #7aa6ff;
+    --accent-ink: #0d1b3a;
+    --error: #ff8a80;
+    --error-bg: #3a1f1c;
+    --warning: #ffcf6e;
+    --warning-bg: #3a2f14;
+    --ok: #7fd79a;
+    --ok-bg: #16301f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0 1rem 3rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
 }
 
 a {
-  color: #0b5fff;
+  color: var(--accent);
 }
 
-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin-block: 1.5rem;
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0 0 0.5rem;
 }
 
-input {
-  flex: 1;
-  min-width: 12rem;
-  padding: 0.4rem 0.6rem;
-  font: inherit;
+h1 {
+  font-size: 1.75rem;
+  margin-top: 1.5rem;
+}
+
+h2 {
+  font-size: 1.15rem;
+}
+
+h3 {
+  font-size: 1rem;
+  margin-top: 1.25rem;
+  color: var(--ink-2);
+}
+
+p {
+  margin: 0 0 0.75rem;
+}
+
+.lede {
+  font-size: 1.05rem;
+  color: var(--ink-2);
+  max-width: 44rem;
 }
 
 button {
-  padding: 0.4rem 1rem;
   font: inherit;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
 }
 
-#messages {
-  padding-inline-start: 1.2rem;
+button:hover {
+  filter: brightness(1.08);
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input,
+select {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--ink);
+  max-width: 100%;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- nav */
+
+nav[aria-label="site"] {
+  display: flex;
+  gap: 1.25rem;
+  align-items: baseline;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+nav[aria-label="site"] a {
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+nav[aria-label="site"] a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+nav[aria-label="site"] .brand {
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 1.1rem;
+}
+
+main {
+  max-width: 96rem;
+  margin: 0 auto;
+}
+
+/* ------------------------------------------------------------- home */
+
+.start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  align-items: flex-end;
+  margin: 1.5rem 0;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  max-width: 44rem;
+}
+
+.start .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 12rem;
+}
+
+.start label {
+  font-size: 0.9rem;
+  color: var(--ink-2);
+}
+
+/* ------------------------------------------------------------- plan */
+
+.plan-head .meta {
+  color: var(--ink-2);
+}
+
+.summary {
+  color: var(--ink-2);
+}
+
+.summary strong {
+  font-size: 1.15rem;
+}
+
+.notice {
+  display: inline-block;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.plan-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.semesters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: var(--gap);
+}
+
+.semester {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.semester--over {
+  border-color: var(--warning);
+}
+
+.semester h2 {
+  margin-bottom: 0.1rem;
+}
+
+.units {
+  color: var(--ink-3);
+  font-size: 0.9rem;
+  margin-bottom: 0.6rem;
+}
+
+.units-n {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.entries {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.entry {
+  border: 1px solid var(--rule);
+  border-left-width: 4px;
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+}
+
+.entry--error {
+  border-left-color: var(--error);
+}
+
+.entry--warning {
+  border-left-color: var(--warning);
+}
+
+.entry-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
+  align-items: baseline;
+}
+
+.entry .code {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.entry .title {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.entry-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+.entry .u {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.entry form {
+  margin: 0;
+}
+
+.remove {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.85rem;
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--rule);
+}
+
+.remove:hover {
+  color: var(--error);
+  border-color: var(--error);
+  filter: none;
+}
+
+.flags {
+  list-style: none;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.flag {
+  display: block;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  padding: 0.35rem 0.55rem;
+  border-radius: 6px;
+}
+
+.flag--error {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+.flag--warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.semester > .flag {
+  margin-bottom: 0.6rem;
+}
+
+.add {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.add select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.extend {
+  align-self: start;
+  margin: 0;
+}
+
+.extend button {
+  background: transparent;
+  color: var(--accent);
+}
+
+/* ------------------------------------------------------------ tally */
+
+.tally {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem 1.1rem;
+}
+
+.tally .total {
+  font-size: 1.05rem;
+}
+
+.tally .total strong {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.verdict {
+  color: var(--ink-2);
+}
+
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.line {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr auto;
+  grid-template-areas:
+    "mark label have"
+    ". missing missing";
+  gap: 0 0.5rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--rule);
+  align-items: baseline;
+}
+
+.line .mark {
+  grid-area: mark;
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.line .label {
+  grid-area: label;
+  color: var(--ink-2);
+}
+
+.line--met .label {
+  color: var(--ink);
+}
+
+.line .have {
+  grid-area: have;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--ink-3);
+}
+
+.line--met .have {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.line--cap .have {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.line .missing {
+  grid-area: missing;
+  font-size: 0.85rem;
+  color: var(--ink-3);
+}
+
+.fine {
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--ink-3);
+}
+
+/* ---------------------------------------------------------- courses */
+
+.courses {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 26rem), 1fr));
+  gap: var(--gap);
+}
+
+.course {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+}
+
+.course h2 {
+  font-size: 1rem;
+}
+
+.course h2 a {
+  font-family: var(--mono);
+}
+
+.course .title {
+  font-weight: 400;
+  color: var(--ink-2);
+}
+
+.course dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem 1rem;
+  font-size: 0.9rem;
+}
+
+.course dl .wide {
+  grid-column: 1 / -1;
+}
+
+.course dt {
+  color: var(--ink-3);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.course dd {
+  margin: 0;
+}
+
+.course .flag {
+  margin-top: 0.4rem;
+}
+
+/* ---------------------------------------------------------- readme */
+
+article {
+  max-width: 44rem;
+}
+
+article img {
+  max-width: 100%;
+  height: auto;
+}
+
+article pre {
+  overflow-x: auto;
+  padding: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+article code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+/* ------------------------------------------------------- wide screens */
+
+@media (min-width: 64rem) {
+  body {
+    padding-inline: 2rem;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  .plan-body {
+    grid-template-columns: minmax(0, 1fr) 22rem;
+  }
+
+  .tally {
+    position: sticky;
+    top: 1rem;
+  }
+
+  /* the tally is beside the plan here, so the header's summary is noise */
+  .summary {
+    display: none;
+  }
+}
+
+@media (min-width: 100rem) {
+  .semesters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }

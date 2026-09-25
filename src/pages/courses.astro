@@ -1,0 +1,61 @@
+---
+import Base from "../layouts/Base.astro";
+import { getCatalogue } from "../lib/db";
+
+// The catalogue as a person can check it: every course the planner knows,
+// what it was read from, and the requisite line in the page's own words.
+// This is where "the data is real" is shown rather than claimed.
+const catalogue = getCatalogue();
+const courses = [...catalogue.courses.values()].sort((a, b) => a.code.localeCompare(b.code));
+const program = [...catalogue.programs.values()][0];
+const specialisation = [...catalogue.specialisations.values()][0];
+const runs = (offerings: string[]): string =>
+  offerings.length === 0
+    ? "No current offerings"
+    : offerings.map((s) => `Semester ${s.slice(1)}`).join(" and ");
+---
+
+<Base title="Courses · Tally">
+  <h1>Courses</h1>
+  <p class="lede">
+    The {courses.length} courses this planner knows: the{" "}
+    {program && <a href={program.sourceUrl}>{program.name}</a>}'s compulsory, foundation and
+    capstone courses, the{" "}
+    {specialisation && <a href={specialisation.sourceUrl}>{specialisation.name}</a>}{" "}
+    specialisation's, and the electives I deal with. Each was transcribed from its 2026
+    Programs & Courses page, linked from its code; the requisite line is the page's, condensed.
+  </p>
+
+  <ul class="courses">
+    {
+      courses.map((c) => (
+        <li class="course" id={c.code}>
+          <h2>
+            <a href={c.sourceUrl}>{c.code}</a> <span class="title">{c.title}</span>
+          </h2>
+          <dl>
+            <div>
+              <dt>Units</dt>
+              <dd>{c.units}</dd>
+            </div>
+            <div>
+              <dt>Runs</dt>
+              <dd>{runs(c.offerings)}</dd>
+            </div>
+            <div class="wide">
+              <dt>Requisites</dt>
+              <dd>
+                {c.requisiteText}
+                {!c.requisitesVerified && (
+                  <span class="flag flag--warning">
+                    Not checked by the planner: this line has a shape it can't model.
+                  </span>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </li>
+      ))
+    }
+  </ul>
+</Base>
