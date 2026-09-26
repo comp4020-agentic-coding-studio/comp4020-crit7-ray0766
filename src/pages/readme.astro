@@ -8,7 +8,14 @@ const title = readme.getHeadings().find((h) => h.depth === 1)?.text ?? "README";
 
 // README images are committed to public/ and linked relatively (public/x.png)
 // so they render on GitHub; here they're served from the site root.
-const html = (await readme.compiledContent()).replace(/(src|href)="public\//g, '$1="/');
+// Markdown images still come out as /_image?href=… URLs, and the deployed
+// image can't run that transform (no sharp), so link the built file instead.
+const html = (await readme.compiledContent())
+  .replace(/(src|href)="public\//g, '$1="/')
+  .replace(/src="\/_image\?href=([^&"]+)[^"]*"/g, (whole, href) => {
+    const path = decodeURIComponent(href);
+    return path.startsWith("/_astro/") ? `src="${path}"` : whole;
+  });
 ---
 
 <Base title={title}>
