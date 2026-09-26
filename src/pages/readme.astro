@@ -12,5 +12,5 @@ const html = (await readme.compiledContent()).replace(/(src|href)="public\//g, '
 ---
 
 <Base title={title}>
-  <article set:html={html} />
+  <article class="column" set:html={html} />
 </Base>

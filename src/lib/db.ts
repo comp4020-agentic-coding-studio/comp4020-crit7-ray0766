@@ -123,6 +123,13 @@ export function moveEntry(planId: string, entryId: number, session: string): boo
 }
 
 /** One more semester on the end of the plan. */
+/** Give a plan a new name; a blank one is ignored, the old name stays. */
+export function renamePlan(planId: string, name: string): boolean {
+  const trimmed = name.trim().slice(0, 80);
+  if (!trimmed) return false;
+  return db.update(plans).set({ name: trimmed }).where(eq(plans.id, planId)).run().changes > 0;
+}
+
 export function extendPlan(planId: string): void {
   db.update(plans)
     .set({ semesters: sql`${plans.semesters} + 1` })

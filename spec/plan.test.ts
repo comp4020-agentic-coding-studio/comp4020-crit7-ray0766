@@ -157,6 +157,21 @@ describe("plans", () => {
     expect(res.status).toBe(400);
   });
 
+  it("renames the plan through the form the page renders for it", async () => {
+    const doc = await page(planPath);
+    const form = doc.querySelector<HTMLFormElement>('form[action$="/rename"]');
+    expect(form, "the page carries a rename form").not.toBeNull();
+    const res = await post(form?.getAttribute("action") ?? "", new URLSearchParams({ name: "renamed plan" }));
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(planPath);
+    const after = await page(planPath);
+    expect(after.body.textContent).toContain("renamed plan");
+    expect(after.querySelector('input[name="name"]')?.getAttribute("value")).toBe("renamed plan");
+    // a blank name is not a name: the old one stays
+    await post(form?.getAttribute("action") ?? "", new URLSearchParams({ name: "   " }));
+    expect((await page(planPath)).body.textContent).toContain("renamed plan");
+  });
+
   it("adds a semester on the end when asked", async () => {
     const res = await post(`/api/plans/${planId}/extend`, new URLSearchParams());
     expect(res.status).toBe(303);

@@ -1,19 +1,19 @@
 ---
-// The frame every page shares: language, viewport, title, the one site nav.
-// The invariants in spec/ check each of these on every route, so a new page
-// gets them by using this layout rather than by remembering them.
+// The frame every page shares: language, viewport, title, the top bar with
+// the one site nav. The invariants in spec/ check each of these on every
+// route, so a new page gets them by using this layout rather than by
+// remembering them. A plan page fills the bar's two slots — its name where
+// the wordmark's neighbour goes, its tools beside the nav links.
 import "../styles.css";
 
 interface Props {
   title: string;
   description?: string;
-  /** the planner spreads across the whole window; the other pages read in a column */
-  wide?: boolean;
-  /** what the top bar says after the wordmark: the plan, on a plan page */
-  crumb?: string;
+  /** the planner is an app that fills the window; the other pages read in a column */
+  app?: boolean;
 }
 
-const { title, description, wide = false, crumb } = Astro.props;
+const { title, description, app = false } = Astro.props;
 ---
 
 <!doctype html>
@@ -24,18 +24,57 @@ const { title, description, wide = false, crumb } = Astro.props;
     <meta name="color-scheme" content="light dark" />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
+    <script is:inline>
+      // The theme the person chose last time, applied before first paint so
+      // there is no flash; with no choice the system's preference applies.
+      try {
+        const t = localStorage.getItem("tally-theme");
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
   </head>
-  <body class:list={{ wide }}>
-    <nav aria-label="site">
-      <a href="/" class="brand"><span class="mark" aria-hidden="true">T</span>Tally</a>
-      {crumb && <span class="crumb">· {crumb}</span>}
-      <span class="nav-links">
+  <body class:list={{ app }}>
+    <header class="bar">
+      <a href="/" class="brand"><span class="mark" aria-hidden="true">T</span><span class="wordmark">Tally</span></a>
+      <slot name="bar-title" />
+      <button class="more" popovertarget="bar-tools" aria-label="Menu" hidden>⋯</button>
+      <nav id="bar-tools" popover aria-label="site">
+        <slot name="bar-form" />
         <a href="/courses/">Courses</a>
         <a href="/readme/">About</a>
-      </span>
-    </nav>
+        <slot name="bar-tools" />
+        <button type="button" class="theme" aria-label="Switch light or dark mode" title="Switch light / dark" hidden>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 1a7 7 0 1 0 0 14V1z"></path><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"></circle></svg>
+        </button>
+      </nav>
+    </header>
     <main>
       <slot />
     </main>
+    <p class="toast" role="status"><slot name="toast" /></p>
+    <script>
+      // The bar's two JavaScript-only controls are hidden until this runs.
+      const toggle = document.querySelector<HTMLButtonElement>(".theme");
+      const more = document.querySelector<HTMLButtonElement>(".more");
+      const root = document.documentElement;
+      if (toggle) {
+        toggle.hidden = false;
+        toggle.addEventListener("click", () => {
+          const dark = root.dataset.theme
+            ? root.dataset.theme === "dark"
+            : matchMedia("(prefers-color-scheme: dark)").matches;
+          root.dataset.theme = dark ? "light" : "dark";
+          try {
+            localStorage.setItem("tally-theme", root.dataset.theme);
+          } catch {}
+        });
+      }
+      // The phone folds the bar's tools behind a ⋯ button; without script
+      // the tools stay inline, which is just a longer bar.
+      if (more && "popover" in HTMLElement.prototype) {
+        more.hidden = false;
+        document.body.classList.add("has-more");
+      }
+    </script>
   </body>
 </html>

@@ -44,7 +44,10 @@ Every course card carries the colour of the requirement it counts towards —
 compulsory, foundation, capstone, the specialisation's core or electives,
 electives — and a grey bar when nothing counts it, so a semester reads at a
 glance. A flagged card says a few words; the full sentence, in ANUHub's terms,
-is in the list under the plan.
+is one tap away, in the card's drawer with the requisite line as Programs &
+Courses writes it, and in the list under the plan. Every control is a form
+first — the drawer, the search and the menus are what the script adds on top —
+so the plan still works with scripts off.
 
 What is enforced, in `spec/`: a plan persists across a reload; a real course is
 never refused; every rule (requisite order, the concurrent case, incompatibility,

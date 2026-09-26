@@ -8,15 +8,24 @@ import {
   FULL_TIME_UNITS,
   ISSUE_TITLES,
   type Issue,
+  lineCategory,
+  nominalCategory,
+  type Progress,
 } from "../../lib/rules";
 import { currentSession, labelSession, planSessions, semesterOf } from "../../lib/sessions";
 
-// The plan page: years as rows, the two semesters of each as cards, every
-// course a card coloured by the requirement it counts towards; then what
-// ANUHub would say about each flagged placement, in full; beside it all, the
-// requirements with what each line has. The data-session / data-course
-// attributes are the page's promise to spec/plan.test.ts: which semester a
-// course sits in, read the way a person reads it.
+// The plan page, after the design sheet (For-ai/crit7-plan/design/Tally v3):
+// the requirements down the left with a ring for the tally and a bar per
+// line; the years as rows on the right, the two semesters of each a cell,
+// every course a card coloured by the requirement it counts towards and
+// flagged in a few words when ANUHub would say something; the whole sentence,
+// the requisite line as written, and the move and remove controls in a
+// drawer per card; a search dialog to add a course. Everything is a form
+// first and a dialog second, so the page works with the script off.
+//
+// The data-session / data-course attributes are the page's promise to
+// spec/plan.test.ts: which semester a course sits in, read the way a person
+// reads it; each card carries its own /move and /delete forms.
 const plan = Astro.params.id ? getPlan(Astro.params.id) : undefined;
 if (!plan) return new Response("No such plan", { status: 404 });
 
@@ -34,26 +43,33 @@ const specialisation = plan.specialisationCode
   ? catalogue.specialisations.get(plan.specialisationCode)
   : undefined;
 
-// only ever a code the catalogue knows, so the notice can't carry arbitrary text
+// only ever a code the catalogue knows, so the toast can't carry arbitrary text
 const already = Astro.url.searchParams.get("already");
 const notice =
   already && catalogue.courses.has(already) ? `${already} is already in this plan.` : undefined;
+// ?add=<session> opens the search dialog server-side, for the script-off path
+const addParam = Astro.url.searchParams.get("add");
+const addSession = addParam && sessions.includes(addParam) ? addParam : undefined;
 
-const courseOptions = [...catalogue.courses.values()].sort((a, b) =>
-  a.code.localeCompare(b.code),
-);
 const unitsOf = (code: string): number => catalogue.courses.get(code)?.units ?? 0;
 const unitsIn = (session: string): number =>
   entries.filter((e) => e.session === session).reduce((n, e) => n + unitsOf(e.courseCode), 0);
+const runsIn = (offerings: string[]): string =>
+  offerings.length === 0
+    ? "no current offerings"
+    : offerings.length === 2
+      ? "Semester 1 and 2"
+      : `Semester ${offerings[0]!.slice(1)}`;
+const shortLabel = (session: string): string =>
+  `${semesterOf(session)} ${session.slice(0, 4)}`;
 
 // years as rows: each year holds the sessions of the plan that fall in it
 const years = [...new Set(sessions.map((s) => s.slice(0, 4)))].map((year) => ({
   year,
   sessions: sessions.filter((s) => s.startsWith(year)),
 }));
-const firstYear = years[0]?.year;
-const lastYear = years[years.length - 1]?.year;
 const now = currentSession(new Date());
+const isDone = (session: string): boolean => session < now;
 
 const issuesFor = (entryId: number): Issue[] =>
   evaluation.issues.filter((i) => i.entryId === entryId);
@@ -71,279 +87,561 @@ const shortFor = (issues: Issue[]): string => {
   if (requisites === issues.length) return `${requisites} requisites not in plan`;
   return `${issues.length} things ANUHub would say`;
 };
+const says = (i: Issue): string => `ANUHub would say: ${ISSUE_TITLES[i.code].replace(/\.$/, "")}`;
 
+// the tally
 const errors = evaluation.issues.filter((i) => i.severity === "error").length;
 const warnings = evaluation.issues.filter((i) => i.severity === "warning").length;
-const { units, counted, needed } = evaluation.totals;
-const programLines = evaluation.progress.filter((p) => p.ownerKind === "program");
-const specialisationLines = evaluation.progress.filter((p) => p.ownerKind === "specialisation");
-const lineCategory = (p: (typeof evaluation.progress)[number]): Category | "level" => {
-  if (p.kind === "level_min") return "level";
-  if (p.ownerKind === "specialisation") {
-    return p.kind === "max" ? "specialisation-elective" : "specialisation-core";
-  }
-  if (p.kind === "all") return "compulsory";
-  if (p.kind === "min") return "foundation";
-  if (p.kind === "max") return "capstone";
-  return "elective";
+const { counted, needed } = evaluation.totals;
+const pct = needed ? Math.round((counted / needed) * 100) : 0;
+const circumference = 2 * Math.PI * 38;
+const ringDash = `${((Math.min(pct, 100) / 100) * circumference).toFixed(1)} ${circumference.toFixed(1)}`;
+const bounceText = `${errors} ANUHub would bounce`;
+const warningText = `${warnings} ${warnings === 1 ? "warning" : "warnings"}`;
+
+// the requirement lines, with what to show for each
+const groups = [
+  { name: program?.name ?? "", lines: evaluation.progress.filter((p) => p.ownerKind === "program") },
+  ...(specialisation
+    ? [
+        {
+          name: specialisation.name,
+          lines: evaluation.progress.filter((p) => p.ownerKind === "specialisation"),
+        },
+      ]
+    : []),
+];
+const lineView = (p: Progress) => {
+  const category: Category | "level" = lineCategory(p) ?? "level";
+  const met = p.satisfied && p.kind !== "max";
+  return {
+    category,
+    met,
+    ofText: p.kind === "max" ? `of up to ${p.needed}` : `of ${p.needed}`,
+    pct: p.needed ? Math.min(100, Math.round((p.have / p.needed) * 100)) : 0,
+    // the counted courses, then (for a line that names its courses) what's missing
+    chips: [
+      ...p.courses.map((code) => ({ code, placed: true })),
+      ...p.missing.map((code) => ({ code, placed: false })),
+    ],
+  };
 };
-const legend = (Object.keys(CATEGORY_LABELS) as Category[]).filter((c) => c !== "uncounted");
-const usesUncounted = [...evaluation.categories.values()].includes("uncounted");
+// the line a placed course is counting towards, for the drawer
+const lineFor = (code: string): Progress | undefined =>
+  evaluation.progress.find((p) => p.kind !== "level_min" && p.courses.includes(code));
+
+// the search dialog's rows: every course, coloured by what it would count as
+const courseRows = [...catalogue.courses.values()]
+  .sort((a, b) => a.code.localeCompare(b.code))
+  .map((c) => {
+    const placed = entries.filter((e) => e.courseCode === c.code).length;
+    return {
+      ...c,
+      category: nominalCategory(catalogue, plan, c.code),
+      full: placed >= (c.repeatable ? 2 : 1),
+    };
+  });
+// what the row would be flagged with in the chosen semester (script mirrors this)
+const preview = (
+  row: (typeof courseRows)[number],
+  session: string | undefined,
+): { text: string; level: "error" | "warning" | "note" } | undefined => {
+  if (!session) return undefined;
+  if (row.offerings.length === 0) return { text: "no current offerings", level: "error" };
+  if (!row.offerings.includes(semesterOf(session))) {
+    return { text: `not offered in Semester ${semesterOf(session).slice(1)}`, level: "error" };
+  }
+  if (!row.requisitesVerified) return { text: "requisites not checked", level: "warning" };
+  if (row.full) return { text: "already in this plan", level: "note" };
+  return undefined;
+};
+
+const title = `${plan.name} · Tally`;
 ---
 
-<Base title={`${plan.name} · Tally`} wide crumb={`${plan.name} · ${program?.name ?? ""}${specialisation ? ` (${specialisation.code})` : ""}`}>
-  <header class="plan-head">
-    <h1>{program?.name}</h1>
-    <p class="sub">
-      {specialisation && <>{specialisation.name} · </>}{needed} units · {firstYear}–{lastYear}
-    </p>
-    <div class="band" role="status">
-      <p class="stat">
-        <strong>{counted}</strong> of {needed} units count towards the program
-        {units > counted && <span class="stat-note"> · {units - counted} placed units don't</span>}
-      </p>
-      <p class:list={["stat", { "stat--error": errors > 0 }]}>
-        <strong>{errors}</strong> {errors === 1 ? "placement" : "placements"} ANUHub would bounce
-      </p>
-      <p class:list={["stat", { "stat--warning": warnings > 0 }]}>
-        <strong>{warnings}</strong> {warnings === 1 ? "warning" : "warnings"}
-      </p>
-    </div>
-    {notice && <p class="notice" role="status">{notice}</p>}
-  </header>
+<Base title={title} app>
+  <h1 class="plan-title" slot="bar-title">{plan.name}</h1>
+  <form slot="bar-form" class="rename" method="post" action={`/api/plans/${plan.id}/rename`}>
+    <label for="plan-name" class="visually-hidden">Plan name</label>
+    <input id="plan-name" name="name" value={plan.name} maxlength="80" required autocomplete="off" />
+  </form>
+  <button slot="bar-tools" type="button" class="btn copy" hidden>
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6.5 9.5 9.5 6.5M5 11l-1 1a2.5 2.5 0 0 1-3.5-3.5l2-2A2.5 2.5 0 0 1 6 6.5M11 5l1-1a2.5 2.5 0 0 1 3.5 3.5l-2 2A2.5 2.5 0 0 1 10 9.5"></path></svg>
+    Copy link
+  </button>
+  <Fragment slot="toast">{notice}</Fragment>
 
-  <div class="plan-body" data-plan={plan.id}>
-    <div class="plan-main">
-      <h2 class="eyebrow" id="plan-h">Plan</h2>
-      <div class="years">
-        {
-          years.map(({ year, sessions: inYear }) => (
-            <div class="year">
-              <div class="year-label">
-                <span class="year-n">{year}</span>
-                <span class="year-units">{inYear.reduce((n, s) => n + unitsIn(s), 0)} units</span>
-              </div>
-              <div class="year-semesters">
-                {inYear.map((session) => {
-                  const load = unitsIn(session);
-                  const over = sessionIssues(session);
-                  const done = session < now;
-                  return (
-                    <section
-                      class:list={["semester", { "semester--over": over.length > 0, "semester--done": done }]}
-                      data-session={session}
-                      style={semesterOf(session) === "S2" && inYear.length === 1 ? "grid-column: 2" : undefined}
-                      aria-label={labelSession(session)}
-                    >
-                      <header class="semester-head">
-                        <h3 id={`h-${session}`}>Semester {semesterOf(session).slice(1)}</h3>
-                        <span class="load">
-                          <span class="load-n">{load}</span> of {FULL_TIME_UNITS} units{done && " · done"}
-                        </span>
-                      </header>
-                      {over.map((i) => (
-                        <p class="flag flag--warning" title={i.message}>{i.message}</p>
-                      ))}
-                      <ul class="entries" data-dropzone={session}>
-                        {entries
-                          .filter((e) => e.session === session)
-                          .map((e) => {
-                            const course = catalogue.courses.get(e.courseCode);
-                            const issues = issuesFor(e.id);
-                            const level = worst(issues);
-                            const category = evaluation.categories.get(e.courseCode) ?? "uncounted";
-                            return (
-                              <li
-                                class:list={["entry", `cat-${category}`, level && `entry--${level}`]}
-                                data-course={e.courseCode}
-                                data-entry={e.id}
-                                draggable="true"
-                                title={issues.map((i) => i.message).join(" ")}
-                              >
-                                <span class="code">{e.courseCode}</span>
-                                <span class="title">
-                                  {course?.title ?? "(unknown course)"}
-                                  {issues.length > 0 && (
-                                    <>
-                                      {" · "}
-                                      <span class={`short short--${level}`}>
-                                        <span aria-hidden="true">↩ </span>
-                                        {shortFor(issues)}
-                                      </span>
-                                    </>
-                                  )}
-                                </span>
-                                <span class="u">{course?.units ?? "?"} units</span>
-                                <div class="entry-actions">
-                                  <details class="move">
-                                    <summary aria-label={`Move ${e.courseCode}`} title="Move to another semester">⋯</summary>
-                                    <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/move`}>
-                                      <label for={`mv-${e.id}`} class="visually-hidden">Move {e.courseCode} to</label>
-                                      <select id={`mv-${e.id}`} name="session">
-                                        {sessions.filter((s) => s !== session).map((s) => (
-                                          <option value={s}>{labelSession(s)}</option>
-                                        ))}
-                                      </select>
-                                      <button>Move</button>
-                                    </form>
-                                  </details>
-                                  <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/delete`}>
-                                    <button class="remove" aria-label={`Remove ${e.courseCode}`} title="Remove">×</button>
-                                  </form>
-                                </div>
-                              </li>
-                            );
-                          })}
-                      </ul>
-                      <details class="add">
-                        <summary>+ Add a course</summary>
-                        <form method="post" action={`/api/plans/${plan.id}/entries`}>
-                          <input type="hidden" name="session" value={session} />
-                          <label for={`add-${session}`} class="visually-hidden">
-                            Course to add to {labelSession(session)}
-                          </label>
-                          <input
-                            id={`add-${session}`}
-                            name="course"
-                            list="course-list"
-                            placeholder="Type a code or a title…"
-                            autocomplete="off"
-                            required
-                            pattern="[A-Za-z]{4}[0-9]{4}"
-                            title="A course code, like COMP6442 — pick one from the list"
-                          />
-                          <button>Add</button>
-                        </form>
-                      </details>
-                    </section>
-                  );
-                })}
-              </div>
-            </div>
-          ))
-        }
-      </div>
-      <datalist id="course-list">
-        {courseOptions.map((c) => <option value={c.code}>{c.title} · {c.units} units</option>)}
-      </datalist>
-
-      <div class="plan-foot">
-        <ul class="legend" aria-label="Card colours">
-          {legend.map((c) => (
-            <li class={`cat-${c}`}><span class="swatch" aria-hidden="true"></span>{CATEGORY_LABELS[c]}</li>
-          ))}
-          {usesUncounted && (
-            <li class="cat-uncounted"><span class="swatch" aria-hidden="true"></span>{CATEGORY_LABELS.uncounted}</li>
-          )}
-        </ul>
-        <form method="post" action={`/api/plans/${plan.id}/extend`} class="extend">
-          <button>+ Add a semester</button>
-        </form>
-      </div>
-
-      <section class="verdicts" aria-labelledby="verdicts-h">
-        <h2 class="eyebrow" id="verdicts-h">What ANUHub would say</h2>
-        {
-          evaluation.issues.length === 0 ? (
-            <p class="fine">Nothing. Every placement here is one ANUHub would take.</p>
-          ) : (
-            <ol class="verdict-list">
-              {evaluation.issues.map((i) => (
-                <li class:list={["verdict", `verdict--${i.severity}`]}>
-                  {i.courseCode && <span class="code">{i.courseCode}</span>}
-                  {i.courseCode && " · "}
-                  {labelSession(i.session)} — <strong>{ISSUE_TITLES[i.code]}</strong> {i.message}
-                </li>
-              ))}
-            </ol>
-          )
-        }
-        <p class="fine">
-          Tally keeps every placement. These are the responses ANUHub would give on enrolment
-          day, and why.
-        </p>
-      </section>
-    </div>
-
-    <aside class="requirements" aria-labelledby="req-h">
+  <div class="plan" data-plan={plan.id}>
+    <aside class="requirements" aria-label="Requirements">
       <details class="sheet" open>
-        <summary>
-          <span class="eyebrow" id="req-h">Requirements</span>
-          <span class="sheet-summary">{counted} of {needed} units · {errors} ANUHub would bounce</span>
+        <summary class="sheet-bar">
+          <span class="handle" aria-hidden="true"></span>
+          <h2 class="count">{counted} of {needed} units count</h2>
+          <span class:list={["flags", { "flags--error": errors > 0 }]}>
+            <span class:list={["sq", errors > 0 ? "sq--error" : "sq--none"]} aria-hidden="true"></span>{bounceText}
+          </span>
+          <span class="hint">Requirements</span>
+          <span class="bar-track" aria-hidden="true"><span class="bar-fill" style={`width:${Math.min(pct, 100)}%;display:block`}></span></span>
         </summary>
-        <table class="req">
-          <thead>
-            <tr><th scope="col">Requirement</th><th scope="col">Units</th><th scope="col">Counted courses</th></tr>
-          </thead>
-          <tbody>
-            <tr class="group"><th scope="rowgroup" colspan="3">{program?.name}</th></tr>
-            {programLines.map((p) => (
-              <tr class:list={["line", { "line--met": p.satisfied && p.kind !== "max" }]}>
-                <th scope="row">
-                  <span class={`swatch cat-${lineCategory(p)}`} aria-hidden="true"></span>{p.label}
-                  {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
-                </th>
-                <td class="have">
-                  <strong>{p.have}</strong> {p.kind === "max" ? "of up to" : "of"} {p.needed}
-                  {p.satisfied && p.kind !== "max" && <span class="tick" aria-label="met"> ✓</span>}
-                </td>
-                <td class="codes">{p.courses.join(" ")}</td>
-              </tr>
-            ))}
-            {specialisation && <tr class="group"><th scope="rowgroup" colspan="3">{specialisation.name}</th></tr>}
-            {specialisationLines.map((p) => (
-              <tr class:list={["line", { "line--met": p.satisfied && p.kind !== "max" }]}>
-                <th scope="row">
-                  <span class={`swatch cat-${lineCategory(p)}`} aria-hidden="true"></span>{p.label}
-                  {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
-                </th>
-                <td class="have">
-                  <strong>{p.have}</strong> {p.kind === "max" ? "of up to" : "of"} {p.needed}
-                  {p.satisfied && p.kind !== "max" && <span class="tick" aria-label="met"> ✓</span>}
-                </td>
-                <td class="codes">{p.courses.join(" ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p class="fine">
-          Data transcribed from ANU Programs & Courses; the <a href="/courses/">course list</a> links
-          every page. Requisite lines Tally can't model are reported as "not checked"; courses with no
-          current offerings are reported as such. The offering pattern is 2026's, assumed to repeat.
-        </p>
+
+        <div class="sheet-head">
+          <div class="ring" role="img" aria-label={`${pct}% of the program's units count`}>
+            <svg width="88" height="88" viewBox="0 0 88 88" aria-hidden="true">
+              <circle cx="44" cy="44" r="38" fill="none" stroke="var(--surface-2)" stroke-width="8"></circle>
+              <circle cx="44" cy="44" r="38" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" stroke-dasharray={ringDash}></circle>
+            </svg>
+            <span class="pct">{pct}%</span>
+          </div>
+          <div class="who">
+            <h2 class="prog">{program?.name}</h2>
+            {specialisation && <p class="spec">{specialisation.name}</p>}
+            <p class="count"><b>{counted}</b> <span>of {needed} units count</span></p>
+            {(errors > 0 || warnings > 0) && (
+              <p class="flags">
+                {errors > 0 && <span class="flags--error"><span class="sq sq--error" aria-hidden="true"></span> {bounceText}</span>}
+                {warnings > 0 && <span><span class="sq sq--warning" aria-hidden="true"></span> {warningText}</span>}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div class="sheet-body">
+          {groups.map((g) => (
+            <>
+              <h3 class="eyebrow group-name">{g.name}</h3>
+              {g.lines.map((p) => {
+                const v = lineView(p);
+                return (
+                  <details class:list={["line", `cat-${v.category}`]}>
+                    <summary>
+                      <span class="row">
+                        <span class="swatch" aria-hidden="true"></span>
+                        <span class="label">{p.label}</span>
+                        <span class="have">
+                          <b>{p.have}</b><span>{v.ofText}</span>
+                          {v.met && (
+                            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--green)" stroke-width="2.2" role="img" aria-label="met"><path d="m3 8.5 3 3 7-7"></path></svg>
+                          )}
+                        </span>
+                      </span>
+                      <span class="bar-track" aria-hidden="true"><span class="bar-fill" style={`width:${v.pct}%;display:block`}></span></span>
+                    </summary>
+                    <div class="chips">
+                      {v.chips.length === 0 && <span class="none">nothing placed counts here yet</span>}
+                      {v.chips.map((ch) => (
+                        <span class:list={["chip", { "chip--missing": !ch.placed }]} title={ch.placed ? "in the plan" : "still to place"}>{ch.code}</span>
+                      ))}
+                    </div>
+                  </details>
+                );
+              })}
+            </>
+          ))}
+          <p class="fine">
+            Transcribed from ANU Programs & Courses 2026; the <a href="/courses/">course list</a> links
+            every page. The offering pattern is 2026's, assumed to repeat.
+          </p>
+        </div>
       </details>
     </aside>
+
+    <div class="board">
+      {years.map(({ year, sessions: inYear }) => (
+        <div class="year">
+          <div class="year-label">
+            <h2 class="year-n">{year}</h2>
+            <span class="year-units">{inYear.reduce((n, s) => n + unitsIn(s), 0)} units</span>
+          </div>
+          {inYear.map((session) => {
+            const load = unitsIn(session);
+            const over = sessionIssues(session);
+            const done = isDone(session);
+            return (
+              <section
+                class:list={["semester", { "semester--done": done }]}
+                data-session={session}
+                style={semesterOf(session) === "S2" && inYear.length === 1 ? "grid-column: 3" : undefined}
+                aria-label={labelSession(session)}
+              >
+                <header class="semester-head">
+                  <h3>Semester {semesterOf(session).slice(1)}</h3>
+                  <span class="lock" title={done ? "This semester is over" : "Still to come"} role="img" aria-label={done ? "over" : "still to come"}>
+                    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                      <rect x="3" y="7" width="10" height="7" rx="1.5" fill="currentColor"></rect>
+                      <path d={done ? "M5 7V5a3 3 0 0 1 6 0v2" : "M5 7V5a3 3 0 0 1 6 0"} stroke="currentColor" stroke-width="1.6" fill="none"></path>
+                    </svg>
+                  </span>
+                </header>
+
+                <ul class="entries" data-dropzone={session}>
+                  {entries
+                    .filter((e) => e.session === session)
+                    .map((e) => {
+                      const course = catalogue.courses.get(e.courseCode);
+                      const issues = issuesFor(e.id);
+                      const level = worst(issues);
+                      const category = evaluation.categories.get(e.courseCode) ?? "uncounted";
+                      const targets = sessions.filter((s) => s !== session);
+                      const line = lineFor(e.courseCode);
+                      const drawerId = `d-${e.id}`;
+                      return (
+                        <li
+                          class:list={["entry", `cat-${category}`, level && `entry--${level}`]}
+                          data-course={e.courseCode}
+                          data-entry={e.id}
+                          draggable={done ? undefined : "true"}
+                        >
+                          <span class="stripe" aria-hidden="true"></span>
+                          <button type="button" class="open" aria-haspopup="dialog" data-drawer={drawerId} title={issues.map((i) => i.message).join("\n") || undefined}>
+                            <span class="row">
+                              <span class="code">{e.courseCode}</span>
+                              <span class="title">{course?.title ?? "(unknown course)"}</span>
+                            </span>
+                            {issues.length > 0 && (
+                              <span class={`short short--${level}`}>
+                                {level === "error" ? (
+                                  <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><rect width="16" height="16" rx="4" fill="currentColor"></rect><path d="M11 5v3.5H5.5M7.5 6.5 5.5 8.5l2 2" stroke="var(--surface)" stroke-width="1.6" fill="none"></path></svg>
+                                ) : (
+                                  <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1z" fill="currentColor"></path><rect x="7.25" y="6" width="1.5" height="4" fill="var(--surface)"></rect><rect x="7.25" y="11" width="1.5" height="1.5" fill="var(--surface)"></rect></svg>
+                                )}
+                                <span>{shortFor(issues)}</span>
+                              </span>
+                            )}
+                          </button>
+                          <span class="u">{course?.units ?? "?"} units</span>
+                          <details class="menu">
+                            <summary aria-label={`More actions for ${e.courseCode}`} title="Move to…, Remove">⋯</summary>
+                            <div class="menu-pop">
+                              <p class="eyebrow">Move to</p>
+                              <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/move`}>
+                                {targets.map((t) => (
+                                  <button class="menu-item" name="session" value={t}>
+                                    <span>{labelSession(t)}</span>
+                                    {course && course.offerings.length > 0 && !course.offerings.includes(semesterOf(t)) && (
+                                      <span class="note">not offered</span>
+                                    )}
+                                  </button>
+                                ))}
+                              </form>
+                              <hr />
+                              <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/delete`}>
+                                <button class="menu-item menu-item--danger">Remove</button>
+                              </form>
+                            </div>
+                          </details>
+
+                          <dialog class="drawer" id={drawerId} aria-labelledby={`${drawerId}-t`}>
+                            <div class="drawer-head">
+                              <span class:list={["stripe", `cat-${category}`]} aria-hidden="true"></span>
+                              <div class="who">
+                                <div class="code">{e.courseCode}</div>
+                                <h2 id={`${drawerId}-t`}>{course?.title ?? "(unknown course)"}</h2>
+                                <p class="meta">
+                                  {course?.units} units · {CATEGORY_LABELS[category]} · runs {runsIn(course?.offerings ?? [])}
+                                </p>
+                              </div>
+                              <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+                            </div>
+                            <div class="drawer-body">
+                              <section>
+                                <p class="eyebrow">Placed in {labelSession(session)}</p>
+                                <ol class="verdict-list">
+                                  {issues.length === 0 ? (
+                                    <li class="verdict verdict--ok">
+                                      <div class="says">ANUHub would enrol you</div>
+                                      <div>{e.courseCode} runs in {labelSession(session)} and every requisite Tally knows about is met earlier in the plan.</div>
+                                    </li>
+                                  ) : (
+                                    issues.map((i) => (
+                                      <li class:list={["verdict", `verdict--${i.severity}`]}>
+                                        <div class="says">{says(i)}</div>
+                                        <div>{i.message}</div>
+                                      </li>
+                                    ))
+                                  )}
+                                </ol>
+                              </section>
+                              <section>
+                                <p class="eyebrow">Requisites · as written on Programs & Courses</p>
+                                {course?.requisiteText ? (
+                                  <p class="req-text">{course.requisiteText}</p>
+                                ) : (
+                                  <p class="req-text none">no requisite line on the course page</p>
+                                )}
+                              </section>
+                              <section>
+                                <p class="eyebrow">Counts towards</p>
+                                <p class="counts">
+                                  <span class:list={["swatch", `cat-${category}`]} aria-hidden="true"></span>
+                                  {line ? line.label : "No line — every line it could count towards is already full."}
+                                </p>
+                              </section>
+                              {course && <a class="pnc" href={course.sourceUrl}>View on Programs & Courses ↗</a>}
+                            </div>
+                            <div class="drawer-foot">
+                              <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/move`}>
+                                {targets.map((t) => (
+                                  <button class="btn" name="session" value={t} title={`Move to ${labelSession(t)}`}>→ {shortLabel(t)}</button>
+                                ))}
+                              </form>
+                              <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/delete`}>
+                                <button class="btn btn--danger">Remove</button>
+                              </form>
+                            </div>
+                          </dialog>
+                        </li>
+                      );
+                    })}
+                </ul>
+
+                <div class="semester-foot">
+                  <a class="btn btn--dashed add" href={`?add=${session}#add`} data-add={session} data-label={labelSession(session)}>+ Add a course</a>
+                  <span
+                    class:list={["load", { "load--over": over.length > 0 }]}
+                    title={over.length > 0 ? over.map((i) => i.message).join(" ") : `Full-time load is ${FULL_TIME_UNITS} units`}
+                  >{load} of {FULL_TIME_UNITS} units</span>
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      ))}
+
+      <form method="post" action={`/api/plans/${plan.id}/extend`} class="extend">
+        <button class="btn btn--dashed">+ Add a semester</button>
+      </form>
+
+      <details class="verdicts">
+        <summary>What ANUHub would say · {evaluation.issues.length}</summary>
+        {evaluation.issues.length === 0 ? (
+          <p class="fine">Nothing. Every placement here is one ANUHub would take.</p>
+        ) : (
+          <ol class="verdict-list">
+            {evaluation.issues.map((i) => (
+              <li class:list={["verdict", `verdict--${i.severity}`]}>
+                <div class="says">
+                  {i.courseCode && <span class="code">{i.courseCode} · </span>}{labelSession(i.session)} — {ISSUE_TITLES[i.code]}
+                </div>
+                <div>{i.message}</div>
+              </li>
+            ))}
+          </ol>
+        )}
+        <p class="fine">Tally keeps every placement. These are the responses ANUHub would give on enrolment day, and why.</p>
+      </details>
+    </div>
   </div>
 
+  <dialog class="search" id="add" aria-label="Add a course" open={addSession ? true : undefined}>
+    <div class="search-head">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--ink-3)" stroke-width="1.8" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3.5 3.5"></path></svg>
+      <input type="search" id="q" placeholder="Search by code or title" aria-label="Search courses" autocomplete="off" />
+      <span class="into">into <span data-into>{addSession ? labelSession(addSession) : ""}</span></span>
+      <form method="dialog"><button class="close" aria-label="Close">×</button></form>
+    </div>
+    <form method="post" action={`/api/plans/${plan.id}/entries`}>
+      <input type="hidden" name="session" value={addSession ?? ""} data-session-field />
+      <ul class="results">
+        {courseRows.map((c) => {
+          const p = preview(c, addSession);
+          return (
+            <li>
+              <button
+                class:list={["result", { "result--none": c.offerings.length === 0 }]}
+                name="course"
+                value={c.code}
+                data-offerings={c.offerings.join(" ")}
+                data-unverified={c.requisitesVerified ? undefined : "1"}
+                data-full={c.full ? "1" : undefined}
+              >
+                <span class:list={["dot", `cat-${c.category}`]} title={CATEGORY_LABELS[c.category]} aria-hidden="true"></span>
+                <span class="code">{c.code}</span>
+                <span class="what">
+                  <span class="title">{c.title}</span>
+                  <span class="meta">
+                    <span>{c.units} units · {runsIn(c.offerings)}</span>
+                    <span class:list={["preview", p && p.level !== "note" && `preview--${p.level}`]}>{p?.text}</span>
+                  </span>
+                </span>
+                <span class="cat">{CATEGORY_LABELS[c.category]}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <p class="empty" hidden>No course matching “<span data-q></span>” in Tally's transcript of Programs & Courses.</p>
+    </form>
+    <div class="search-foot"><span>↵ adds the first match</span><span>Esc closes</span><span>Greyed = no current offerings</span></div>
+  </dialog>
+
   <script>
+    const root = document.querySelector<HTMLElement>(".plan");
+    const planId = root?.dataset.plan;
+    const toast = document.querySelector<HTMLElement>(".toast");
+    let toastTimer: number | undefined;
+    const showToast = (text: string) => {
+      if (!toast) return;
+      toast.textContent = text;
+      clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => (toast.textContent = ""), 2200);
+    };
+
     // Live half: every plan change is broadcast over the SSE stream, and any
     // other tab or device showing this plan reloads to pick it up. The tab
     // that made the change is already on its way back via the 303, so it
     // drops the stream the moment it submits a form.
-    const body = document.querySelector<HTMLElement>(".plan-body");
-    const planId = body?.dataset.plan;
+    const source = new EventSource("/api/events");
+    source.addEventListener("message", (event) => {
+      const change = JSON.parse(event.data);
+      if (change.planId === planId) location.reload();
+    });
+    document.addEventListener("submit", (e) => {
+      if ((e.target as HTMLFormElement).method !== "dialog") source.close();
+    });
 
     // The requirements are a panel beside the plan on a wide screen and a
     // sheet at the foot of a phone; the sheet starts folded so the plan is
     // what you see first. (Without this script it starts open, which still
     // works — it just covers more.)
     const sheet = document.querySelector<HTMLDetailsElement>(".sheet");
-    if (sheet && !matchMedia("(min-width: 64rem)").matches) sheet.removeAttribute("open");
-
-    const source = new EventSource("/api/events");
-    source.addEventListener("message", (event) => {
-      const change = JSON.parse(event.data);
-      if (change.planId === planId) location.reload();
+    const wide = matchMedia("(min-width: 64rem)");
+    const foldSheet = () => {
+      if (!sheet) return;
+      if (wide.matches) sheet.open = true;
+      else sheet.removeAttribute("open");
+    };
+    foldSheet();
+    wide.addEventListener("change", foldSheet);
+    // on the phone the open sheet has a scrim behind it (the aside's own
+    // ::before); a tap on the scrim lands on the aside and folds the sheet
+    document.querySelector(".requirements")?.addEventListener("click", (e) => {
+      if (e.target === e.currentTarget && sheet) sheet.open = false;
     });
-    document.addEventListener("submit", () => source.close());
 
-    // Drag a card to another semester. Progressive: the Move menu on each
-    // card posts the same route without any of this.
+    // The name in the bar saves itself when you leave the field.
+    const rename = document.querySelector<HTMLFormElement>(".rename");
+    rename?.querySelector("input")?.addEventListener("change", () => rename.requestSubmit());
+
+    // Copy link: the URL is the plan's only key, so it is worth a button.
+    const copy = document.querySelector<HTMLButtonElement>(".copy");
+    if (copy && navigator.clipboard) {
+      copy.hidden = false;
+      copy.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(location.origin + location.pathname);
+          showToast("Link copied");
+        } catch {
+          showToast("Couldn't copy — the address bar has it");
+        }
+      });
+    }
+
+    // One ⋯ menu open at a time, and a click elsewhere or Escape closes it.
+    const menus = [...document.querySelectorAll<HTMLDetailsElement>(".menu")];
+    for (const menu of menus) {
+      menu.addEventListener("toggle", () => {
+        if (menu.open) for (const other of menus) if (other !== menu) other.open = false;
+      });
+    }
+    document.addEventListener("click", (e) => {
+      for (const menu of menus) {
+        if (menu.open && !menu.contains(e.target as Node)) menu.open = false;
+      }
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") for (const menu of menus) menu.open = false;
+    });
+
+    // Dialogs: the drawer behind each card, the search behind each slot. The
+    // scrim is the dialog's own backdrop, so a click on it lands on the
+    // dialog element itself and nothing inside it.
+    const closeOnScrim = (dialog: HTMLDialogElement) =>
+      dialog.addEventListener("click", (e) => {
+        if (e.target === dialog) dialog.close();
+      });
+    for (const button of document.querySelectorAll<HTMLButtonElement>(".open[data-drawer]")) {
+      const dialog = document.getElementById(button.dataset.drawer ?? "") as HTMLDialogElement | null;
+      if (!dialog) continue;
+      closeOnScrim(dialog);
+      button.addEventListener("click", () => dialog.showModal());
+    }
+
+    const search = document.getElementById("add") as HTMLDialogElement | null;
+    const q = document.getElementById("q") as HTMLInputElement | null;
+    const sessionField = search?.querySelector<HTMLInputElement>("[data-session-field]");
+    const into = search?.querySelector<HTMLElement>("[data-into]");
+    const results = [...(search?.querySelectorAll<HTMLButtonElement>(".result") ?? [])];
+    const empty = search?.querySelector<HTMLElement>(".empty");
+    const emptyQ = search?.querySelector<HTMLElement>("[data-q]");
+    if (search && q && sessionField && into) {
+      closeOnScrim(search);
+      // what each row would be flagged with in the chosen semester — the
+      // same words the server uses when it renders the dialog itself
+      const previewFor = (row: HTMLButtonElement, session: string) => {
+        const offerings = (row.dataset.offerings ?? "").split(" ").filter(Boolean);
+        const semester = session.slice(-2);
+        if (offerings.length === 0) return ["no current offerings", "error"];
+        if (!offerings.includes(semester)) return [`not offered in Semester ${semester.slice(1)}`, "error"];
+        if (row.dataset.unverified) return ["requisites not checked", "warning"];
+        if (row.dataset.full) return ["already in this plan", "note"];
+        return ["", "note"];
+      };
+      const openSearch = (session: string, label: string) => {
+        sessionField.value = session;
+        into.textContent = label;
+        for (const row of results) {
+          const [text, level] = previewFor(row, session);
+          const preview = row.querySelector<HTMLElement>(".preview");
+          if (!preview) continue;
+          preview.textContent = text ?? "";
+          preview.className = `preview${level === "note" ? "" : ` preview--${level}`}`;
+        }
+        q.value = "";
+        filter();
+        if (search.open) search.close();
+        search.showModal();
+        q.focus();
+      };
+      const filter = () => {
+        const needle = q.value.trim().toLowerCase();
+        let shown = 0;
+        for (const row of results) {
+          const hit = !needle || (row.textContent ?? "").toLowerCase().includes(needle);
+          (row.parentElement as HTMLElement).hidden = !hit;
+          if (hit) shown++;
+        }
+        if (empty) empty.hidden = shown > 0;
+        if (emptyQ) emptyQ.textContent = q.value;
+      };
+      q.addEventListener("input", filter);
+      q.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        results.find((row) => !(row.parentElement as HTMLElement).hidden)?.click();
+      });
+      for (const link of document.querySelectorAll<HTMLAnchorElement>("a.add[data-add]")) {
+        link.addEventListener("click", (e) => {
+          e.preventDefault();
+          openSearch(link.dataset.add ?? "", link.dataset.label ?? "");
+        });
+      }
+      // opened by ?add= (the script-off path): make it modal now the script is here
+      if (search.open) {
+        const session = sessionField.value;
+        const label = into.textContent ?? "";
+        history.replaceState(null, "", location.pathname);
+        openSearch(session, label);
+      }
+    }
+
+    // Drag a card to another semester. Progressive: the Move buttons in the
+    // menu and the drawer post the same route without any of this.
     let dragging: HTMLElement | null = null;
     for (const card of document.querySelectorAll<HTMLElement>(".entry[draggable]")) {
       card.addEventListener("dragstart", (e) => {
         dragging = card;
         card.classList.add("dragging");
+        for (const menu of menus) menu.open = false;
         e.dataTransfer?.setData("text/plain", card.dataset.entry ?? "");
         if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
       });

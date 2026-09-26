@@ -164,23 +164,28 @@ export function evaluatePlan(catalogue: Catalogue, plan: PlanLike): Evaluation {
   };
 }
 
+/** The category a requirement line's courses carry; the level line counts
+ *  across the others and has none. */
+export function lineCategory(
+  line: Pick<CatalogueRequirement, "kind" | "ownerKind">,
+): Category | undefined {
+  if (line.kind === "level_min") return undefined;
+  if (line.ownerKind === "specialisation") {
+    return line.kind === "max" ? "specialisation-elective" : "specialisation-core";
+  }
+  if (line.kind === "all") return "compulsory";
+  if (line.kind === "min") return "foundation";
+  if (line.kind === "max") return "capstone";
+  return "elective";
+}
+
 // A course takes the category of the first line that counted it, in the
 // order the lines are shown, skipping the level line (which counts across
 // the others). Anything no line counted doesn't count towards the program.
 function categorise(progress: Progress[], entries: EntryLike[]): Map<string, Category> {
   const categories = new Map<string, Category>();
-  const categoryOf = (p: Progress): Category | undefined => {
-    if (p.kind === "level_min") return undefined;
-    if (p.ownerKind === "specialisation") {
-      return p.kind === "max" ? "specialisation-elective" : "specialisation-core";
-    }
-    if (p.kind === "all") return "compulsory";
-    if (p.kind === "min") return "foundation";
-    if (p.kind === "max") return "capstone";
-    return "elective";
-  };
   for (const p of progress) {
-    const category = categoryOf(p);
+    const category = lineCategory(p);
     if (!category) continue;
     for (const code of p.courses) {
       if (!categories.has(code)) categories.set(code, category);
@@ -190,6 +195,22 @@ function categorise(progress: Progress[], entries: EntryLike[]): Map<string, Cat
     if (!categories.has(e.courseCode)) categories.set(e.courseCode, "uncounted");
   }
   return categories;
+}
+
+/** What a course would count as if it were placed: the first line that names
+ *  it, else the elective pool. Whether it actually counts once placed is
+ *  `evaluatePlan`'s answer — a line can be full — so this is the colour the
+ *  search dialog shows before a placement exists, nothing more. */
+export function nominalCategory(
+  catalogue: Catalogue,
+  plan: Pick<PlanLike, "programCode" | "specialisationCode">,
+  code: string,
+): Category {
+  for (const r of requirementsFor(catalogue, plan.programCode, plan.specialisationCode)) {
+    const category = lineCategory(r);
+    if (category && r.courses.includes(code)) return category;
+  }
+  return "elective";
 }
 
 // ----------------------------------------------------------------- rules

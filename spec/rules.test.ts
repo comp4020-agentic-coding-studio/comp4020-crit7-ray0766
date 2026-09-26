@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Catalogue, CatalogueCourse, CatalogueRequirement } from "../src/lib/catalogue";
-import { type EntryLike, evaluatePlan } from "../src/lib/rules";
+import { type EntryLike, evaluatePlan, nominalCategory } from "../src/lib/rules";
 
 // The rules, on a catalogue small enough to hold in your head. Each test is a
 // sentinel that was seen red first — the rule it guards was broken on
@@ -247,6 +247,16 @@ describe("rules: progress", () => {
       TEST6600: "elective",
       TEST8200: "uncounted",
     });
+  });
+
+  it("says what an unplaced course would count as, by the first line that names it", () => {
+    // the search dialog colours every course before it is placed
+    const nominal = (code: string) => nominalCategory(catalogue, plan(), code);
+    expect(nominal("TEST1000")).toBe("compulsory");
+    expect(nominal("TEST6200")).toBe("foundation");
+    expect(nominal("TEST8100")).toBe("capstone");
+    expect(nominal("TEST7000")).toBe("elective"); // named by no line: the elective pool
+    expect(nominal("MATH6000")).toBe("elective"); // the open elective line takes any course
   });
 
   it("adds up what the lines counted, not everything placed", () => {
