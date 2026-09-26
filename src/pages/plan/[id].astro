@@ -98,6 +98,7 @@ const circumference = 2 * Math.PI * 38;
 const ringDash = `${((Math.min(pct, 100) / 100) * circumference).toFixed(1)} ${circumference.toFixed(1)}`;
 const bounceText = `${errors} ANUHub would bounce`;
 const warningText = `${warnings} ${warnings === 1 ? "warning" : "warnings"}`;
+const flagSummary = [errors > 0 && bounceText, warnings > 0 && warningText].filter(Boolean).join(" · ");
 
 // the requirement lines, with what to show for each
 const groups = [
@@ -177,9 +178,11 @@ const title = `${plan.name} · Tally`;
         <summary class="sheet-bar">
           <span class="handle" aria-hidden="true"></span>
           <h2 class="count">{counted} of {needed} units count</h2>
-          <span class:list={["flags", { "flags--error": errors > 0 }]}>
-            <span class:list={["sq", errors > 0 ? "sq--error" : "sq--none"]} aria-hidden="true"></span>{bounceText}
-          </span>
+          {flagSummary && (
+            <span class:list={["flags", { "flags--error": errors > 0 }]}>
+              <span class:list={["sq", errors > 0 ? "sq--error" : "sq--warning"]} aria-hidden="true"></span>{flagSummary}
+            </span>
+          )}
           <span class="hint">Requirements</span>
           <span class="bar-track" aria-hidden="true"><span class="bar-fill" style={`width:${Math.min(pct, 100)}%;display:block`}></span></span>
         </summary>
