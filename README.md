@@ -40,6 +40,12 @@ Two assumptions are stated on the page: a course's offering pattern is 2026's
 and is assumed to repeat, and requisites about which program you are in are
 taken as met, because every plan here is a Master of Computing plan.
 
+Every course card carries the colour of the requirement it counts towards —
+compulsory, foundation, capstone, the specialisation's core or electives,
+electives — and a grey bar when nothing counts it, so a semester reads at a
+glance. A flagged card says a few words; the full sentence, in ANUHub's terms,
+is in the list under the plan.
+
 What is enforced, in `spec/`: a plan persists across a reload; a real course is
 never refused; every rule (requisite order, the concurrent case, incompatibility,
 offerings, load, each kind of requirement line) has a test that was seen red
