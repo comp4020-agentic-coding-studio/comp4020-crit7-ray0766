@@ -33,10 +33,21 @@ export interface PlanLike {
 
 export type IssueCode = "requisite" | "incompatible" | "not-offered" | "overload" | "unverified";
 
+export const ISSUE_TITLES: Record<IssueCode, string> = {
+  requisite: "Requisite not met.",
+  incompatible: "Incompatible.",
+  "not-offered": "Not offered.",
+  overload: "Over the full-time load.",
+  unverified: "Not checked.",
+};
+
 export interface Issue {
   code: IssueCode;
   severity: "error" | "warning";
+  /** the full sentence, in ANUHub's terms */
   message: string;
+  /** a few words for the card itself; the sentence is a hover or a list away */
+  short: string;
   session: string;
   /** absent for a session-wide issue such as an overload */
   entryId?: number;
@@ -58,9 +69,32 @@ export interface Progress {
   missing: string[];
 }
 
+/** Which kind of requirement a placed course is counting towards — the
+ *  colour a course card carries. */
+export type Category =
+  | "compulsory"
+  | "foundation"
+  | "capstone"
+  | "specialisation-core"
+  | "specialisation-elective"
+  | "elective"
+  | "uncounted";
+
+export const CATEGORY_LABELS: Record<Category, string> = {
+  compulsory: "Compulsory",
+  foundation: "Foundation",
+  capstone: "Capstone",
+  "specialisation-core": "Specialisation core",
+  "specialisation-elective": "Specialisation elective",
+  elective: "Elective",
+  uncounted: "Doesn't count",
+};
+
 export interface Evaluation {
   issues: Issue[];
   progress: Progress[];
+  /** course code → the category of the line that counted it */
+  categories: Map<string, Category>;
   totals: {
     /** every unit in the plan */
     units: number;
@@ -107,6 +141,7 @@ export function evaluatePlan(catalogue: Catalogue, plan: PlanLike): Evaluation {
         code: "overload",
         severity: "warning",
         session,
+        short: `${total} units: needs an overload approval`,
         message: `${total} units in ${labelSession(session)}: over the ${FULL_TIME_UNITS}-unit full-time load, so it needs an overload approval.`,
       });
     }
@@ -121,7 +156,40 @@ export function evaluatePlan(catalogue: Catalogue, plan: PlanLike): Evaluation {
     .reduce((n, p) => n + p.have, 0);
   const needed = catalogue.programs.get(plan.programCode)?.totalUnits ?? 0;
 
-  return { issues, progress, totals: { units: total, counted, needed } };
+  return {
+    issues,
+    progress,
+    categories: categorise(progress, entries),
+    totals: { units: total, counted, needed },
+  };
+}
+
+// A course takes the category of the first line that counted it, in the
+// order the lines are shown, skipping the level line (which counts across
+// the others). Anything no line counted doesn't count towards the program.
+function categorise(progress: Progress[], entries: EntryLike[]): Map<string, Category> {
+  const categories = new Map<string, Category>();
+  const categoryOf = (p: Progress): Category | undefined => {
+    if (p.kind === "level_min") return undefined;
+    if (p.ownerKind === "specialisation") {
+      return p.kind === "max" ? "specialisation-elective" : "specialisation-core";
+    }
+    if (p.kind === "all") return "compulsory";
+    if (p.kind === "min") return "foundation";
+    if (p.kind === "max") return "capstone";
+    return "elective";
+  };
+  for (const p of progress) {
+    const category = categoryOf(p);
+    if (!category) continue;
+    for (const code of p.courses) {
+      if (!categories.has(code)) categories.set(code, category);
+    }
+  }
+  for (const e of entries) {
+    if (!categories.has(e.courseCode)) categories.set(e.courseCode, "uncounted");
+  }
+  return categories;
 }
 
 // ----------------------------------------------------------------- rules
@@ -139,6 +207,7 @@ function requisiteIssues(
         ...base,
         code: "unverified",
         severity: "warning",
+        short: "requisites not checked",
         message:
           "Requisites not checked: the course page's line has a shape this planner can't model. Read it before you rely on this placement.",
       },
@@ -160,16 +229,19 @@ function requisiteIssues(
       .map((code) => placed.get(code))
       .filter((other): other is EntryLike => other !== undefined);
     let message: string;
+    let short: string;
     if (late.length === 0) {
       message = `Needs ${list(group.options)} before ${labelSession(entry.session)}; none is in this plan.`;
+      short = "requisite not in plan";
     } else {
       const other = late[0]!;
       message =
         other.session === entry.session
           ? `Needs ${other.courseCode} completed first, but it is in the same semester — ANUHub will want a permission code.`
           : `Needs ${other.courseCode} completed first, but it is in ${labelSession(other.session)}, after this.`;
+      short = `needs ${other.courseCode} first`;
     }
-    issues.push({ ...base, code: "requisite", severity: "error", message });
+    issues.push({ ...base, code: "requisite", severity: "error", short, message });
   }
   return issues;
 }
@@ -189,6 +261,7 @@ function incompatibleIssues(
       session: entry.session,
       entryId: entry.id,
       courseCode: course.code,
+      short: `incompatible with ${code}`,
       message: `Incompatible with ${code}, which is also in this plan (${labelSession(other.session)}).`,
     });
   }
@@ -206,11 +279,12 @@ function offeringIssue(course: CatalogueCourse, entry: EntryLike): Issue | undef
     courseCode: course.code,
   };
   if (course.offerings.length === 0) {
-    return { ...base, message: "No current offerings on Programs & Courses." };
+    return { ...base, short: "no current offerings", message: "No current offerings on Programs & Courses." };
   }
   const runs = course.offerings.map((s) => `Semester ${s.slice(1)}`).join(" and ");
   return {
     ...base,
+    short: `not offered in Semester ${semester.slice(1)}`,
     message: `Not offered in Semester ${semester.slice(1)}: the 2026 page lists ${runs} only.`,
   };
 }

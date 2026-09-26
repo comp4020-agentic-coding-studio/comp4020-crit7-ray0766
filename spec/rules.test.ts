@@ -228,6 +228,27 @@ describe("rules: progress", () => {
     expect(line(e, "elective", 1)).toMatchObject({ have: 6, satisfied: true, courses: ["MATH6000"] });
   });
 
+  it("colours a course by the line that counted it, and greys what nothing counted", () => {
+    const e = evaluate(
+      entry("TEST1000", "2026-S1"), // all → compulsory
+      entry("TEST6200", "2026-S1"), // min → foundation
+      entry("TEST8100", "2026-S2"), // max → capstone
+      entry("TEST6300", "2026-S2"), // min surplus → elective
+      entry("MATH6000", "2027-S1"), // open elective
+      entry("TEST6600", "2027-S1"), // elective
+      entry("TEST8200", "2027-S2"), // max surplus, and the elective lines are full → doesn't count
+    );
+    expect(Object.fromEntries(e.categories)).toEqual({
+      TEST1000: "compulsory",
+      TEST6200: "foundation",
+      TEST8100: "capstone",
+      TEST6300: "elective",
+      MATH6000: "elective",
+      TEST6600: "elective",
+      TEST8200: "uncounted",
+    });
+  });
+
   it("adds up what the lines counted, not everything placed", () => {
     // 6 (all) + 6 (min) + 6 (max) + 6 (elective, from the min's surplus) + 0
     const e = evaluate(
