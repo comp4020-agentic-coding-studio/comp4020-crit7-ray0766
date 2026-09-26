@@ -111,6 +111,17 @@ export function removeEntry(planId: string, entryId: number): boolean {
   return removed.length > 0;
 }
 
+/** Moves one entry of one plan to another session; false when there was no such entry. */
+export function moveEntry(planId: string, entryId: number, session: string): boolean {
+  const moved = db
+    .update(planEntries)
+    .set({ session })
+    .where(and(eq(planEntries.planId, planId), eq(planEntries.id, entryId)))
+    .returning({ id: planEntries.id })
+    .all();
+  return moved.length > 0;
+}
+
 /** One more semester on the end of the plan. */
 export function extendPlan(planId: string): void {
   db.update(plans)

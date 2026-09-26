@@ -125,12 +125,36 @@ describe("plans", () => {
 
   it("removes a course through the form the page renders for it", async () => {
     const doc = await page(planPath);
-    const form = doc.querySelector<HTMLFormElement>('[data-course="COMP8020"] form');
+    const form = doc.querySelector<HTMLFormElement>('[data-course="COMP8020"] form[action$="/delete"]');
     expect(form, "an entry carries its own remove form").not.toBeNull();
     const res = await post(form?.getAttribute("action") ?? "", new URLSearchParams());
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toBe(planPath);
     expect(entriesIn(await page(planPath), "2026-S2")).toEqual(["COMP6390"]);
+  });
+
+  it("moves a course to another semester through the form the page renders for it", async () => {
+    const doc = await page(planPath);
+    const form = doc.querySelector<HTMLFormElement>('[data-course="COMP6390"] form[action$="/move"]');
+    expect(form, "an entry carries its own move form").not.toBeNull();
+    const res = await post(
+      form?.getAttribute("action") ?? "",
+      new URLSearchParams({ session: "2027-S1" }),
+    );
+    expect(res.status).toBe(303);
+    const after = await page(planPath);
+    expect(entriesIn(after, "2026-S2")).toEqual([]);
+    expect(entriesIn(after, "2027-S1").sort()).toEqual(["COMP6390", "COMP8715"]);
+    // and back, so the later tests see it where they expect
+    await post(form?.getAttribute("action") ?? "", new URLSearchParams({ session: "2026-S2" }));
+    expect(entriesIn(await page(planPath), "2026-S2")).toEqual(["COMP6390"]);
+  });
+
+  it("refuses to move a course to a semester the plan doesn't cover", async () => {
+    const doc = await page(planPath);
+    const form = doc.querySelector<HTMLFormElement>('[data-course="COMP6390"] form[action$="/move"]');
+    const res = await post(form?.getAttribute("action") ?? "", new URLSearchParams({ session: "2031-S1" }));
+    expect(res.status).toBe(400);
   });
 
   it("adds a semester on the end when asked", async () => {
