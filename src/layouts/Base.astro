@@ -7,9 +7,13 @@ import "../styles.css";
 interface Props {
   title: string;
   description?: string;
+  /** the planner spreads across the whole window; the other pages read in a column */
+  wide?: boolean;
+  /** what the top bar says after the wordmark: the plan, on a plan page */
+  crumb?: string;
 }
 
-const { title, description } = Astro.props;
+const { title, description, wide = false, crumb } = Astro.props;
 ---
 
 <!doctype html>
@@ -17,14 +21,18 @@ const { title, description } = Astro.props;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
     <title>{title}</title>
     {description && <meta name="description" content={description} />}
   </head>
-  <body>
+  <body class:list={{ wide }}>
     <nav aria-label="site">
-      <a href="/" class="brand">Tally</a>
-      <a href="/courses/">Courses</a>
-      <a href="/readme/">About</a>
+      <a href="/" class="brand"><span class="mark" aria-hidden="true">T</span>Tally</a>
+      {crumb && <span class="crumb">· {crumb}</span>}
+      <span class="nav-links">
+        <a href="/courses/">Courses</a>
+        <a href="/readme/">About</a>
+      </span>
     </nav>
     <main>
       <slot />

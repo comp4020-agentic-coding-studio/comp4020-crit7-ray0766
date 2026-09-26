@@ -35,3 +35,14 @@ export function semesterOf(session: string): "S1" | "S2" {
   if (!match) throw new Error(`not a session: ${session}`);
   return match[2] === "1" ? "S1" : "S2";
 }
+
+/** The session a date falls in: February–June is Semester 1, July–January
+ *  Semester 2 (breaks count with the semester they follow, so January is
+ *  still the previous year's Semester 2). A session before this one is over,
+ *  which is all "done" means here. */
+export function currentSession(date: Date): string {
+  const month = date.getMonth() + 1;
+  const year = date.getFullYear();
+  if (month === 1) return `${year - 1}-S2`;
+  return `${year}-${month <= 6 ? "S1" : "S2"}`;
+}

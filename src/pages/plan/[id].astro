@@ -1,15 +1,22 @@
 ---
 import Base from "../../layouts/Base.astro";
 import { getCatalogue, getPlan, listEntries } from "../../lib/db";
-import { evaluatePlan, FULL_TIME_UNITS, type Issue } from "../../lib/rules";
-import { labelSession, planSessions } from "../../lib/sessions";
+import {
+  CATEGORY_LABELS,
+  type Category,
+  evaluatePlan,
+  FULL_TIME_UNITS,
+  ISSUE_TITLES,
+  type Issue,
+} from "../../lib/rules";
+import { currentSession, labelSession, planSessions, semesterOf } from "../../lib/sessions";
 
-// The plan page: one section per semester, each with the courses in it, its
-// unit count and a form to add another; beside them, the tally — what the
-// rules say about every placement, and how far the plan is from the program.
-// The data-session / data-course attributes are the page's promise to
-// spec/plan.test.ts: which semester a course sits in, read the way a person
-// reads it.
+// The plan page: years as rows, the two semesters of each as cards, every
+// course a card coloured by the requirement it counts towards; then what
+// ANUHub would say about each flagged placement, in full; beside it all, the
+// requirements with what each line has. The data-session / data-course
+// attributes are the page's promise to spec/plan.test.ts: which semester a
+// course sits in, read the way a person reads it.
 const plan = Astro.params.id ? getPlan(Astro.params.id) : undefined;
 if (!plan) return new Response("No such plan", { status: 404 });
 
@@ -35,10 +42,18 @@ const notice =
 const courseOptions = [...catalogue.courses.values()].sort((a, b) =>
   a.code.localeCompare(b.code),
 );
+const unitsOf = (code: string): number => catalogue.courses.get(code)?.units ?? 0;
 const unitsIn = (session: string): number =>
-  entries
-    .filter((e) => e.session === session)
-    .reduce((n, e) => n + (catalogue.courses.get(e.courseCode)?.units ?? 0), 0);
+  entries.filter((e) => e.session === session).reduce((n, e) => n + unitsOf(e.courseCode), 0);
+
+// years as rows: each year holds the sessions of the plan that fall in it
+const years = [...new Set(sessions.map((s) => s.slice(0, 4)))].map((year) => ({
+  year,
+  sessions: sessions.filter((s) => s.startsWith(year)),
+}));
+const firstYear = years[0]?.year;
+const lastYear = years[years.length - 1]?.year;
+const now = currentSession(new Date());
 
 const issuesFor = (entryId: number): Issue[] =>
   evaluation.issues.filter((i) => i.entryId === entryId);
@@ -50,179 +65,314 @@ const worst = (issues: Issue[]): "error" | "warning" | undefined =>
     : issues.some((i) => i.severity === "warning")
       ? "warning"
       : undefined;
+const shortFor = (issues: Issue[]): string => {
+  if (issues.length === 1) return issues[0]!.short;
+  const requisites = issues.filter((i) => i.code === "requisite").length;
+  if (requisites === issues.length) return `${requisites} requisites not in plan`;
+  return `${issues.length} things ANUHub would say`;
+};
 
 const errors = evaluation.issues.filter((i) => i.severity === "error").length;
 const warnings = evaluation.issues.filter((i) => i.severity === "warning").length;
+const { units, counted, needed } = evaluation.totals;
 const programLines = evaluation.progress.filter((p) => p.ownerKind === "program");
 const specialisationLines = evaluation.progress.filter((p) => p.ownerKind === "specialisation");
-const { units, counted, needed } = evaluation.totals;
+const lineCategory = (p: (typeof evaluation.progress)[number]): Category | "level" => {
+  if (p.kind === "level_min") return "level";
+  if (p.ownerKind === "specialisation") {
+    return p.kind === "max" ? "specialisation-elective" : "specialisation-core";
+  }
+  if (p.kind === "all") return "compulsory";
+  if (p.kind === "min") return "foundation";
+  if (p.kind === "max") return "capstone";
+  return "elective";
+};
+const legend = (Object.keys(CATEGORY_LABELS) as Category[]).filter((c) => c !== "uncounted");
+const usesUncounted = [...evaluation.categories.values()].includes("uncounted");
 ---
 
-<Base title={`${plan.name} · Tally`}>
+<Base title={`${plan.name} · Tally`} wide crumb={`${plan.name} · ${program?.name ?? ""}${specialisation ? ` (${specialisation.code})` : ""}`}>
   <header class="plan-head">
-    <h1>{plan.name}</h1>
-    <p class="meta">
-      {program?.name}
-      {specialisation && <> · {specialisation.name}</>}
-      {" · "}{plan.semesters} semesters from {labelSession(plan.startSession)}
+    <h1>{program?.name}</h1>
+    <p class="sub">
+      {specialisation && <>{specialisation.name} · </>}{needed} units · {firstYear}–{lastYear}
     </p>
-    <p class="summary">
-      <strong>{counted}</strong> of {needed} units count{" · "}
-      {errors === 0 ? "nothing ANUHub would bounce" : `${errors} ANUHub would bounce`}{" · "}
-      <a href="#tally-h">tally</a>
-    </p>
+    <div class="band" role="status">
+      <p class="stat">
+        <strong>{counted}</strong> of {needed} units count towards the program
+        {units > counted && <span class="stat-note"> · {units - counted} placed units don't</span>}
+      </p>
+      <p class:list={["stat", { "stat--error": errors > 0 }]}>
+        <strong>{errors}</strong> {errors === 1 ? "placement" : "placements"} ANUHub would bounce
+      </p>
+      <p class:list={["stat", { "stat--warning": warnings > 0 }]}>
+        <strong>{warnings}</strong> {warnings === 1 ? "warning" : "warnings"}
+      </p>
+    </div>
     {notice && <p class="notice" role="status">{notice}</p>}
   </header>
 
   <div class="plan-body" data-plan={plan.id}>
-    <div class="semesters">
-      {
-        sessions.map((session) => {
-          const load = unitsIn(session);
-          const overload = sessionIssues(session);
-          return (
-            <section
-              class:list={["semester", { "semester--over": overload.length > 0 }]}
-              data-session={session}
-              aria-labelledby={`h-${session}`}
-            >
-              <h2 id={`h-${session}`}>{labelSession(session)}</h2>
-              <p class="units">
-                <span class="units-n">{load}</span> of {FULL_TIME_UNITS} units
-              </p>
-              {overload.map((i) => (
-                <p class="flag flag--warning">{i.message}</p>
-              ))}
-              <ul class="entries">
-                {entries
-                  .filter((e) => e.session === session)
-                  .map((e) => {
-                    const course = catalogue.courses.get(e.courseCode);
-                    const issues = issuesFor(e.id);
-                    const level = worst(issues);
-                    return (
-                      <li
-                        class:list={["entry", level && `entry--${level}`]}
-                        data-course={e.courseCode}
-                      >
-                        <div class="entry-line">
-                          <span class="code">{e.courseCode}</span>
-                          <span class="title">{course?.title ?? "(unknown course)"}</span>
-                        </div>
-                        <div class="entry-foot">
-                          <span class="u">{course?.units ?? "?"} units</span>
-                          <form
-                            method="post"
-                            action={`/api/plans/${plan.id}/entries/${e.id}/delete`}
-                          >
-                            <button class="remove" aria-label={`Remove ${e.courseCode}`}>
-                              Remove
-                            </button>
-                          </form>
-                        </div>
-                        {issues.length > 0 && (
-                          <ul class="flags">
-                            {issues.map((i) => (
-                              <li class:list={["flag", `flag--${i.severity}`]}>{i.message}</li>
-                            ))}
-                          </ul>
-                        )}
-                      </li>
-                    );
-                  })}
-              </ul>
-              <form method="post" action={`/api/plans/${plan.id}/entries`} class="add">
-                <input type="hidden" name="session" value={session} />
-                <label for={`add-${session}`} class="visually-hidden">
-                  Add a course to {labelSession(session)}
-                </label>
-                <select id={`add-${session}`} name="course" required>
-                  <option value="">Add a course…</option>
-                  {courseOptions.map((c) => (
-                    <option value={c.code}>
-                      {c.code} · {c.title} ({c.units} units)
-                    </option>
-                  ))}
-                </select>
-                <button>Add</button>
-              </form>
-            </section>
-          );
-        })
-      }
-      <form method="post" action={`/api/plans/${plan.id}/extend`} class="extend">
-        <button>Add a semester</button>
-      </form>
-    </div>
-
-    <aside class="tally" aria-labelledby="tally-h">
-      <h2 id="tally-h">Tally</h2>
-      <p class="total">
-        <strong>{counted}</strong> of {needed} units count towards the program
-        {units > counted && <> · {units - counted} placed units don't</>}
-      </p>
-      <p class="verdict">
+    <div class="plan-main">
+      <h2 class="eyebrow" id="plan-h">Plan</h2>
+      <div class="years">
         {
-          errors === 0 && warnings === 0
-            ? "Nothing here that ANUHub would bounce."
-            : `${errors} ${errors === 1 ? "placement" : "placements"} ANUHub would bounce · ${warnings} ${warnings === 1 ? "warning" : "warnings"}`
-        }
-      </p>
-
-      <h3>{program?.name}</h3>
-      <ol class="lines">
-        {
-          programLines.map((p) => (
-            <li class:list={["line", { "line--met": p.satisfied, "line--cap": p.kind === "max" }]}>
-              <span class="mark" aria-hidden="true">{p.satisfied && p.kind !== "max" ? "✓" : ""}</span>
-              <span class="label">{p.label}</span>
-              <span class="have">
-                {p.have} {p.kind === "max" ? "of up to" : "of"} {p.needed}
-              </span>
-              {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
-            </li>
+          years.map(({ year, sessions: inYear }) => (
+            <div class="year">
+              <div class="year-label">
+                <span class="year-n">{year}</span>
+                <span class="year-units">{inYear.reduce((n, s) => n + unitsIn(s), 0)} units</span>
+              </div>
+              <div class="year-semesters">
+                {inYear.map((session) => {
+                  const load = unitsIn(session);
+                  const over = sessionIssues(session);
+                  const done = session < now;
+                  return (
+                    <section
+                      class:list={["semester", { "semester--over": over.length > 0, "semester--done": done }]}
+                      data-session={session}
+                      style={semesterOf(session) === "S2" && inYear.length === 1 ? "grid-column: 2" : undefined}
+                      aria-label={labelSession(session)}
+                    >
+                      <header class="semester-head">
+                        <h3 id={`h-${session}`}>Semester {semesterOf(session).slice(1)}</h3>
+                        <span class="load">
+                          <span class="load-n">{load}</span> of {FULL_TIME_UNITS} units{done && " · done"}
+                        </span>
+                      </header>
+                      {over.map((i) => (
+                        <p class="flag flag--warning" title={i.message}>{i.message}</p>
+                      ))}
+                      <ul class="entries" data-dropzone={session}>
+                        {entries
+                          .filter((e) => e.session === session)
+                          .map((e) => {
+                            const course = catalogue.courses.get(e.courseCode);
+                            const issues = issuesFor(e.id);
+                            const level = worst(issues);
+                            const category = evaluation.categories.get(e.courseCode) ?? "uncounted";
+                            return (
+                              <li
+                                class:list={["entry", `cat-${category}`, level && `entry--${level}`]}
+                                data-course={e.courseCode}
+                                data-entry={e.id}
+                                draggable="true"
+                                title={issues.map((i) => i.message).join(" ")}
+                              >
+                                <span class="code">{e.courseCode}</span>
+                                <span class="title">
+                                  {course?.title ?? "(unknown course)"}
+                                  {issues.length > 0 && (
+                                    <>
+                                      {" · "}
+                                      <span class={`short short--${level}`}>
+                                        <span aria-hidden="true">↩ </span>
+                                        {shortFor(issues)}
+                                      </span>
+                                    </>
+                                  )}
+                                </span>
+                                <span class="u">{course?.units ?? "?"} units</span>
+                                <div class="entry-actions">
+                                  <details class="move">
+                                    <summary aria-label={`Move ${e.courseCode}`} title="Move to another semester">⋯</summary>
+                                    <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/move`}>
+                                      <label for={`mv-${e.id}`} class="visually-hidden">Move {e.courseCode} to</label>
+                                      <select id={`mv-${e.id}`} name="session">
+                                        {sessions.filter((s) => s !== session).map((s) => (
+                                          <option value={s}>{labelSession(s)}</option>
+                                        ))}
+                                      </select>
+                                      <button>Move</button>
+                                    </form>
+                                  </details>
+                                  <form method="post" action={`/api/plans/${plan.id}/entries/${e.id}/delete`}>
+                                    <button class="remove" aria-label={`Remove ${e.courseCode}`} title="Remove">×</button>
+                                  </form>
+                                </div>
+                              </li>
+                            );
+                          })}
+                      </ul>
+                      <details class="add">
+                        <summary>+ Add a course</summary>
+                        <form method="post" action={`/api/plans/${plan.id}/entries`}>
+                          <input type="hidden" name="session" value={session} />
+                          <label for={`add-${session}`} class="visually-hidden">
+                            Course to add to {labelSession(session)}
+                          </label>
+                          <input
+                            id={`add-${session}`}
+                            name="course"
+                            list="course-list"
+                            placeholder="Type a code or a title…"
+                            autocomplete="off"
+                            required
+                            pattern="[A-Za-z]{4}[0-9]{4}"
+                            title="A course code, like COMP6442 — pick one from the list"
+                          />
+                          <button>Add</button>
+                        </form>
+                      </details>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
           ))
         }
-      </ol>
+      </div>
+      <datalist id="course-list">
+        {courseOptions.map((c) => <option value={c.code}>{c.title} · {c.units} units</option>)}
+      </datalist>
 
-      {
-        specialisation && (
-          <>
-            <h3>{specialisation.name}</h3>
-            <ol class="lines">
-              {specialisationLines.map((p) => (
-                <li class:list={["line", { "line--met": p.satisfied, "line--cap": p.kind === "max" }]}>
-                  <span class="mark" aria-hidden="true">{p.satisfied && p.kind !== "max" ? "✓" : ""}</span>
-                  <span class="label">{p.label}</span>
-                  <span class="have">
-                    {p.have} {p.kind === "max" ? "of up to" : "of"} {p.needed}
-                  </span>
-                  {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
+      <div class="plan-foot">
+        <ul class="legend" aria-label="Card colours">
+          {legend.map((c) => (
+            <li class={`cat-${c}`}><span class="swatch" aria-hidden="true"></span>{CATEGORY_LABELS[c]}</li>
+          ))}
+          {usesUncounted && (
+            <li class="cat-uncounted"><span class="swatch" aria-hidden="true"></span>{CATEGORY_LABELS.uncounted}</li>
+          )}
+        </ul>
+        <form method="post" action={`/api/plans/${plan.id}/extend`} class="extend">
+          <button>+ Add a semester</button>
+        </form>
+      </div>
+
+      <section class="verdicts" aria-labelledby="verdicts-h">
+        <h2 class="eyebrow" id="verdicts-h">What ANUHub would say</h2>
+        {
+          evaluation.issues.length === 0 ? (
+            <p class="fine">Nothing. Every placement here is one ANUHub would take.</p>
+          ) : (
+            <ol class="verdict-list">
+              {evaluation.issues.map((i) => (
+                <li class:list={["verdict", `verdict--${i.severity}`]}>
+                  {i.courseCode && <span class="code">{i.courseCode}</span>}
+                  {i.courseCode && " · "}
+                  {labelSession(i.session)} — <strong>{ISSUE_TITLES[i.code]}</strong> {i.message}
                 </li>
               ))}
             </ol>
-          </>
-        )
-      }
-      <p class="fine">
-        Requirements and requisites are transcribed from Programs & Courses 2026; the{" "}
-        <a href="/courses/">course list</a> links each one. The offering pattern is 2026's,
-        assumed to repeat.
-      </p>
+          )
+        }
+        <p class="fine">
+          Tally keeps every placement. These are the responses ANUHub would give on enrolment
+          day, and why.
+        </p>
+      </section>
+    </div>
+
+    <aside class="requirements" aria-labelledby="req-h">
+      <details class="sheet" open>
+        <summary>
+          <span class="eyebrow" id="req-h">Requirements</span>
+          <span class="sheet-summary">{counted} of {needed} units · {errors} ANUHub would bounce</span>
+        </summary>
+        <table class="req">
+          <thead>
+            <tr><th scope="col">Requirement</th><th scope="col">Units</th><th scope="col">Counted courses</th></tr>
+          </thead>
+          <tbody>
+            <tr class="group"><th scope="rowgroup" colspan="3">{program?.name}</th></tr>
+            {programLines.map((p) => (
+              <tr class:list={["line", { "line--met": p.satisfied && p.kind !== "max" }]}>
+                <th scope="row">
+                  <span class={`swatch cat-${lineCategory(p)}`} aria-hidden="true"></span>{p.label}
+                  {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
+                </th>
+                <td class="have">
+                  <strong>{p.have}</strong> {p.kind === "max" ? "of up to" : "of"} {p.needed}
+                  {p.satisfied && p.kind !== "max" && <span class="tick" aria-label="met"> ✓</span>}
+                </td>
+                <td class="codes">{p.courses.join(" ")}</td>
+              </tr>
+            ))}
+            {specialisation && <tr class="group"><th scope="rowgroup" colspan="3">{specialisation.name}</th></tr>}
+            {specialisationLines.map((p) => (
+              <tr class:list={["line", { "line--met": p.satisfied && p.kind !== "max" }]}>
+                <th scope="row">
+                  <span class={`swatch cat-${lineCategory(p)}`} aria-hidden="true"></span>{p.label}
+                  {p.missing.length > 0 && <span class="missing">still to place: {p.missing.join(", ")}</span>}
+                </th>
+                <td class="have">
+                  <strong>{p.have}</strong> {p.kind === "max" ? "of up to" : "of"} {p.needed}
+                  {p.satisfied && p.kind !== "max" && <span class="tick" aria-label="met"> ✓</span>}
+                </td>
+                <td class="codes">{p.courses.join(" ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p class="fine">
+          Data transcribed from ANU Programs & Courses; the <a href="/courses/">course list</a> links
+          every page. Requisite lines Tally can't model are reported as "not checked"; courses with no
+          current offerings are reported as such. The offering pattern is 2026's, assumed to repeat.
+        </p>
+      </details>
     </aside>
   </div>
 
   <script>
-    // The live half: every plan change is broadcast over the SSE stream, and
-    // any other tab or device showing this plan reloads to pick it up. The tab
+    // Live half: every plan change is broadcast over the SSE stream, and any
+    // other tab or device showing this plan reloads to pick it up. The tab
     // that made the change is already on its way back via the 303, so it
     // drops the stream the moment it submits a form.
-    const planId = document.querySelector<HTMLElement>(".plan-body")?.dataset.plan;
+    const body = document.querySelector<HTMLElement>(".plan-body");
+    const planId = body?.dataset.plan;
+
+    // The requirements are a panel beside the plan on a wide screen and a
+    // sheet at the foot of a phone; the sheet starts folded so the plan is
+    // what you see first. (Without this script it starts open, which still
+    // works — it just covers more.)
+    const sheet = document.querySelector<HTMLDetailsElement>(".sheet");
+    if (sheet && !matchMedia("(min-width: 64rem)").matches) sheet.removeAttribute("open");
+
     const source = new EventSource("/api/events");
     source.addEventListener("message", (event) => {
       const change = JSON.parse(event.data);
       if (change.planId === planId) location.reload();
     });
     document.addEventListener("submit", () => source.close());
+
+    // Drag a card to another semester. Progressive: the Move menu on each
+    // card posts the same route without any of this.
+    let dragging: HTMLElement | null = null;
+    for (const card of document.querySelectorAll<HTMLElement>(".entry[draggable]")) {
+      card.addEventListener("dragstart", (e) => {
+        dragging = card;
+        card.classList.add("dragging");
+        e.dataTransfer?.setData("text/plain", card.dataset.entry ?? "");
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+        dragging = null;
+        for (const z of document.querySelectorAll(".semester.drop")) z.classList.remove("drop");
+      });
+    }
+    for (const zone of document.querySelectorAll<HTMLElement>(".semester")) {
+      zone.addEventListener("dragover", (e) => {
+        if (!dragging || dragging.closest(".semester") === zone) return;
+        e.preventDefault();
+        zone.classList.add("drop");
+      });
+      zone.addEventListener("dragleave", () => zone.classList.remove("drop"));
+      zone.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        zone.classList.remove("drop");
+        const session = zone.dataset.session;
+        if (!dragging || !session || !planId) return;
+        const entryId = dragging.dataset.entry;
+        source.close();
+        await fetch(`/api/plans/${planId}/entries/${entryId}/move`, {
+          method: "POST",
+          body: new URLSearchParams({ session }),
+        });
+        location.reload();
+      });
+    }
   </script>
 </Base>
