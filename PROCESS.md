@@ -50,4 +50,6 @@ still a plain form underneath
 
 > 我认为这个质量完全不行。你先看看别人好的选课好的 UI 是怎么样的 (this won't do; look at the good planners first)
 
+Going public switched the checks on, and the first run failed a link: the About screenshot 500ed through Astro's image endpoint. The log said sharp was missing; Vite had inlined it where pnpm can't resolve the binary. No retry: the page links the built file, and a test reddens if that route comes back ([`4a0318e`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit7-ray0766/commit/4a0318e)). Using the site myself cut the front door to one button, once a plan could grow at the start as well as the end ([`bf44840...61715fe`](https://github.com/comp4020-agentic-coding-studio/comp4020-crit7-ray0766/compare/bf44840...61715fe)).
+
 ![The demo plan at 390×844, with a flagged placement](public/demo-390x844.png)
