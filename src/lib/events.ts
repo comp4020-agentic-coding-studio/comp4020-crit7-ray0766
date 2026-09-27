@@ -9,5 +9,5 @@ bus.setMaxListeners(0);
 
 export interface PlanEvent {
   planId: string;
-  kind: "entry-added" | "entry-removed" | "entry-moved" | "plan-extended" | "plan-renamed";
+  kind: "entry-added" | "entry-removed" | "entry-moved" | "plan-extended" | "plan-prepended" | "plan-renamed";
 }

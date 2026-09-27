@@ -15,6 +15,13 @@ export function nextSession(session: string): string {
   return match[2] === "1" ? `${year}-S2` : `${year + 1}-S1`;
 }
 
+export function previousSession(session: string): string {
+  const match = session.match(SESSION);
+  if (!match) throw new Error(`not a session: ${session}`);
+  const year = Number(match[1]);
+  return match[2] === "2" ? `${year}-S1` : `${year - 1}-S2`;
+}
+
 /** The `count` sessions a plan covers, starting at `start`. */
 export function planSessions(start: string, count: number): string[] {
   const sessions = [start];

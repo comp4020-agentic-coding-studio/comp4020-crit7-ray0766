@@ -9,6 +9,7 @@ import type { Catalogue } from "./catalogue";
 import * as schema from "./schema";
 import { type Plan, type PlanEntry, planEntries, plans } from "./schema";
 import { loadCatalogue, seedDemoPlan, seedReferenceData } from "./seed";
+import { previousSession } from "./sessions";
 
 // One SQLite file is the app's whole persistent state. In production
 // fly.toml points DATABASE_PATH at the machine's volume (/data), which is
@@ -122,7 +123,6 @@ export function moveEntry(planId: string, entryId: number, session: string): boo
   return moved.length > 0;
 }
 
-/** One more semester on the end of the plan. */
 /** Give a plan a new name; a blank one is ignored, the old name stays. */
 export function renamePlan(planId: string, name: string): boolean {
   const trimmed = name.trim().slice(0, 80);
@@ -130,9 +130,21 @@ export function renamePlan(planId: string, name: string): boolean {
   return db.update(plans).set({ name: trimmed }).where(eq(plans.id, planId)).run().changes > 0;
 }
 
+/** One more semester on the end of the plan. */
 export function extendPlan(planId: string): void {
   db.update(plans)
     .set({ semesters: sql`${plans.semesters} + 1` })
+    .where(eq(plans.id, planId))
+    .run();
+}
+
+/** One more semester at the start of the plan: the courses stay in the
+ *  sessions they're in, the plan just begins a session earlier. */
+export function prependPlan(planId: string): void {
+  const plan = getPlan(planId);
+  if (!plan) return;
+  db.update(plans)
+    .set({ startSession: previousSession(plan.startSession), semesters: sql`${plans.semesters} + 1` })
     .where(eq(plans.id, planId))
     .run();
 }

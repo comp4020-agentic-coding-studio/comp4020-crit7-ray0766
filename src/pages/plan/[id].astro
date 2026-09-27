@@ -249,6 +249,10 @@ const title = `${plan.name} · Tally`;
     </aside>
 
     <div class="board">
+      <form method="post" action={`/api/plans/${plan.id}/prepend`} class="extend">
+        <button class="btn btn--dashed">+ Add a semester before</button>
+      </form>
+
       {years.map(({ year, sessions: inYear }) => (
         <div class="year">
           <div class="year-label">
