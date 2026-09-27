@@ -179,6 +179,25 @@ describe("plans", () => {
     expect(doc.querySelector('[data-session="2028-S1"]')).not.toBeNull();
   });
 
+  it("adds a semester at the start when asked", async () => {
+    const sessionsOf = (doc: Document): string[] =>
+      [...doc.querySelectorAll("[data-session]")].map((el) => el.getAttribute("data-session") ?? "");
+    const before = await page(planPath);
+    const sessions = sessionsOf(before);
+    expect(sessions[0]).toBe("2026-S1");
+    const placed = sessions.map((s) => entriesIn(before, s));
+
+    const res = await post(`/api/plans/${planId}/prepend`, new URLSearchParams());
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe(planPath);
+
+    const after = await page(planPath);
+    expect(sessionsOf(after)).toEqual(["2025-S2", ...sessions]);
+    expect(entriesIn(after, "2025-S2")).toEqual([]);
+    // every semester that was there keeps its courses where they were
+    expect(sessions.map((s) => entriesIn(after, s))).toEqual(placed);
+  });
+
   it("answers 404 for a plan that doesn't exist", async () => {
     const res = await fetch(new URL("/plan/nope-nope", baseUrl));
     expect(res.status).toBe(404);
