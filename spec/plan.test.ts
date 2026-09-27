@@ -1,5 +1,6 @@
 import { JSDOM } from "jsdom";
 import { beforeAll, describe, expect, inject, it } from "vitest";
+import { currentSession } from "../src/lib/sessions";
 
 // The planner's contract, driven over HTTP against the built server: a plan
 // is created and lives at its URL; a course put into a semester is there on
@@ -208,10 +209,28 @@ describe("plans", () => {
     expect(api.status).toBe(404);
   });
 
-  it("falls back to sensible defaults when the create form sends nothing", async () => {
+  it("falls back to the current semester when the create form sends nothing", async () => {
     const res = await post("/api/plans", new URLSearchParams());
     expect(res.status).toBe(303);
     const doc = await page(res.headers.get("location") ?? "");
-    expect(doc.querySelector('[data-session="2026-S1"]')).not.toBeNull();
+    const sessions = [...doc.querySelectorAll("[data-session]")].map((el) => el.getAttribute("data-session"));
+    expect(sessions[0]).toBe(currentSession(new Date()));
+    expect(sessions).toHaveLength(4);
+  });
+});
+
+describe("front door", () => {
+  it("is one button that starts a plan, and the way to the demo", async () => {
+    const doc = await page("/");
+    const forms = doc.querySelectorAll("form");
+    expect(forms.length, "forms on the front door").toBe(1);
+    const form = forms[0]!;
+    expect(form.getAttribute("action")).toBe("/api/plans");
+    expect(form.getAttribute("method")?.toLowerCase()).toBe("post");
+    expect(form.querySelector('[name="name"]') === null, "no plan name to fill in").toBe(true);
+    expect(form.querySelector('[name="start"]') === null, "no first semester to pick").toBe(true);
+    expect(form.querySelectorAll("input, select, textarea").length, "fields in the form").toBe(0);
+    expect(form.querySelectorAll("button").length, "buttons in the form").toBe(1);
+    expect(doc.querySelector('a[href="/plan/demo"]'), "the demo plan is still one click away").not.toBeNull();
   });
 });
