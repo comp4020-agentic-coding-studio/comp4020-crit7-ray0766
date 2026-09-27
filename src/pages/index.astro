@@ -1,11 +1,11 @@
 ---
 import Base from "../layouts/Base.astro";
 import { DEMO_PLAN_ID } from "../lib/seed";
-import { labelSession, planSessions } from "../lib/sessions";
+import { currentSession, labelSession } from "../lib/sessions";
 
 // The front door: what this is, and one form that starts a plan. Plans are
 // not listed anywhere — a plan's URL is the only way to it.
-const starts = planSessions("2026-S1", 4);
+const now = currentSession(new Date());
 ---
 
 <Base
@@ -19,21 +19,12 @@ const starts = planSessions("2026-S1", 4);
         Put courses into semesters. Tally tells you what ANUHub would say when you press
         enrol — requisite not met, incompatible, not offered, over the load — and keeps a
         running count of how many of the program's 96 units your plan counts towards, line
-        by line.
+        by line. A new plan starts in {labelSession(now)}, the semester you're in, and
+        grows a semester at either end.
       </p>
     </div>
 
     <form method="post" action="/api/plans" class="start">
-      <label>
-        Plan name
-        <input name="name" maxlength="80" placeholder="My MComp plan" autocomplete="off" />
-      </label>
-      <label>
-        First semester
-        <select name="start">
-          {starts.map((s) => <option value={s}>{labelSession(s)}</option>)}
-        </select>
-      </label>
       <button class="btn btn--primary">Start a plan</button>
     </form>
 

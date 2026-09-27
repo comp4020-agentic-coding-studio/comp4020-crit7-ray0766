@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { program, specialisation } from "../../../data/mcomp-2026";
 import { createPlan } from "../../../lib/db";
-import { isSession } from "../../../lib/sessions";
+import { currentSession, isSession } from "../../../lib/sessions";
 
 // Start a plan: a name and a first semester are all it takes, and both have
 // defaults, so the form on the home page is one button. The new plan's URL
@@ -11,7 +11,7 @@ export const POST: APIRoute = async ({ request, redirect }) => {
   const name = String(form.get("name") ?? "")
     .trim()
     .slice(0, 80);
-  const start = String(form.get("start") ?? "").trim() || "2026-S1";
+  const start = String(form.get("start") ?? "").trim() || currentSession(new Date());
   if (!isSession(start)) {
     return new Response("start must be a session like 2026-S1", { status: 400 });
   }
